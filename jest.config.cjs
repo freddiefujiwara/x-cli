@@ -13,7 +13,7 @@ module.exports = {
     }]
   },
   extensionsToTreatAsEsm: ['.ts'],
-  testMatch: ['**/*.test.ts'],
+  testMatch: ['**/*.test.[jt]s'],
   collectCoverageFrom: [
     'src/**/*.ts',
     '!src/cli.ts'
