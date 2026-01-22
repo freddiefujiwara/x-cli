@@ -49,6 +49,8 @@ const FEATURES = {
   responsive_web_grok_imagine_annotation_enabled: true,
   responsive_web_grok_community_note_auto_translation_is_enabled: false,
   responsive_web_enhance_cards_enabled: false,
+  post_ctas_fetch_enabled: true,
+  responsive_web_grok_annotations_enabled: true,
 };
 
 const FIELD_TOGGLES = {
