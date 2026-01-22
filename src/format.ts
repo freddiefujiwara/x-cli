@@ -1,4 +1,4 @@
-import type { Tweet, TweetThread } from "./api.js";
+import type { Tweet, TweetThread, NotificationsPage, Notification, NotificationActor } from "./api.js";
 
 const COLORS = {
   reset: "\x1b[0m",
@@ -107,6 +107,79 @@ function highlightJson(json: string): string {
 
 export function formatThreadJson(thread: TweetThread, options?: { color?: boolean }): string {
   const json = JSON.stringify(thread, null, 2);
+  const useColor = options?.color ?? process.stdout.isTTY;
+  return useColor ? highlightJson(json) : json;
+}
+
+// ===== Notifications =====
+
+function formatActors(actors: NotificationActor[]): string {
+  if (actors.length === 0) return "";
+  const firstActor = actors[0];
+  const first = `${COLORS.bold}${firstActor.name || firstActor.username}${COLORS.reset} ${COLORS.gray}@${firstActor.username}${COLORS.reset}`;
+
+  if (actors.length === 1) return first;
+  if (actors.length === 2) {
+    const secondActor = actors[1];
+    const second = `${COLORS.bold}${secondActor.name || secondActor.username}${COLORS.reset} ${COLORS.gray}@${secondActor.username}${COLORS.reset}`;
+    return `${first} and ${second}`;
+  }
+  return `${first} and ${actors.length - 1} others`;
+}
+
+function formatNotification(notification: Notification): string {
+  const { kind, actors, tweet, message } = notification;
+
+  let icon = "";
+  let actionText = "";
+  switch (kind) {
+    case "like":
+      icon = `${COLORS.yellow}❤️${COLORS.reset}`;
+      actionText = "liked your tweet";
+      break;
+    case "retweet":
+    case "repost":
+      icon = `${COLORS.green}🔁${COLORS.reset}`;
+      actionText = "reposted your tweet";
+      break;
+    case "follow":
+      icon = `${COLORS.blue}👤${COLORS.reset}`;
+      actionText = "followed you";
+      break;
+    case "reply":
+      icon = `${COLORS.cyan}💬${COLORS.reset}`;
+      actionText = "replied to your tweet";
+      break;
+    case "mention":
+      icon = `${COLORS.cyan}🔔${COLORS.reset}`;
+      actionText = "mentioned you";
+      break;
+    case "quote":
+      icon = `${COLORS.cyan}📝${COLORS.reset}`;
+      actionText = "quoted your tweet";
+      break;
+    default:
+      icon = "ℹ️";
+      break;
+  }
+
+  const actorStr = formatActors(actors);
+  const messageStr = message ? `"${message}"` : actionText;
+
+  const header = `${icon} ${actorStr} ${messageStr}`;
+  const tweetStr = tweet ? formatTweet(tweet, "  ") : null;
+
+  return [header, tweetStr].filter(Boolean).join("\n");
+}
+
+
+export function formatNotificationsPretty(page: NotificationsPage): string {
+  const lines = page.notifications.map(formatNotification);
+  return lines.join(`\n\n${COLORS.dim}---${COLORS.reset}\n\n`);
+}
+
+export function formatNotificationsJson(page: NotificationsPage, options?: { color?: boolean }): string {
+  const json = JSON.stringify(page.notifications, null, 2);
   const useColor = options?.color ?? process.stdout.isTTY;
   return useColor ? highlightJson(json) : json;
 }
