@@ -677,7 +677,6 @@ export async function getNotificationsTimeline(
   }
 
   const data = await response.json();
-  await writeFile("debug-data.json", JSON.stringify(data, null, 2));
   if (data.errors) throw new Error(`API returned errors: ${JSON.stringify(data.errors)}`);
 
   return parseNotificationsTimelineResponse(data);
@@ -685,7 +684,7 @@ export async function getNotificationsTimeline(
 
 export function parseNotificationsTimelineResponse(data: any): NotificationsPage {
   const instructions =
-    data?.data?.viewer_v2?.user_results?.result?.notification_timeline?.timeline?.instructions ?? [];
+    getByPath(data, "data.viewer_v2.user_results.result.notification_timeline.timeline.instructions") ?? [];
 
   const entries: any[] = [];
   let topCursor: string | undefined;
