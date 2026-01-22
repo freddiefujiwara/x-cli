@@ -2,9 +2,9 @@
 
 import yargs from "yargs";
 import { hideBin } from "yargs/helpers";
-import { getTweetDetail, getTweetAsGuest, extractTweetId } from "./api.js";
+import { getTweetDetail, getTweetAsGuest, extractTweetId, getNotificationsTimeline } from "./api.js";
 import { loadAuth, clearAuth } from "./storage.js";
-import { formatThreadPretty, formatThreadJson } from "./format.js";
+import { formatThreadPretty, formatThreadJson, formatNotificationsJson, formatNotificationsPretty } from "./format.js";
 import { getCompletionScript } from "./completions.js";
 import { installCompletions } from "./setup.js";
 
@@ -69,6 +69,44 @@ const cli = yargs(hideBin(process.argv))
             console.log(formatThreadJson(thread));
           }
         }
+      } catch (error) {
+        console.error(
+          "Error:",
+          error instanceof Error ? error.message : String(error)
+        );
+        process.exit(1);
+      }
+    }
+  )
+  .command(
+    "notify",
+    "View notifications (login required)",
+    (yargs) => {
+      return yargs
+        .option("pretty", {
+          alias: "p",
+          describe: "Pretty print output with colors",
+          type: "boolean",
+          default: false,
+        });
+    },
+    async (argv) => {
+      try {
+        const auth = await loadAuth();
+        if (!auth) {
+          console.error("Login required. Please run 'x login' first.");
+          process.exit(1);
+          return;
+        }
+
+        const page = await getNotificationsTimeline(auth!);
+
+        if (argv.pretty) {
+          console.log(formatNotificationsPretty(page));
+        } else {
+          console.log(formatNotificationsJson(page));
+        }
+
       } catch (error) {
         console.error(
           "Error:",
