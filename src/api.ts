@@ -1,3 +1,4 @@
+import { writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { AuthConfig, buildCookieHeader } from "./auth.js";
 import { ClientTransaction, handleXMigration } from "x-client-transaction-id";
@@ -676,6 +677,7 @@ export async function getNotificationsTimeline(
   }
 
   const data = await response.json();
+  await writeFile("debug-data.json", JSON.stringify(data, null, 2));
   if (data.errors) throw new Error(`API returned errors: ${JSON.stringify(data.errors)}`);
 
   return parseNotificationsTimelineResponse(data);
