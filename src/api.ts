@@ -429,7 +429,6 @@ export async function getNotificationTimeLine(
 }
 
 export function parseNotificationTimelineResponse(data: any): { notifications: Notification[]; nextCursor?: string } {
-  // 1. Specify the root path of the notification data accurately.
   const instructions = data?.data?.viewer_v2?.user_results?.result?.notification_timeline?.timeline?.instructions || [];
   const notifications: Notification[] = [];
   let nextCursor: string | undefined;
@@ -437,75 +436,62 @@ export function parseNotificationTimelineResponse(data: any): { notifications: N
   for (const instruction of instructions) {
     if (instruction.type === "TimelineAddEntries") {
       for (const entry of instruction.entries) {
-        // Get cursor
-        if (entry.content?.entryType === "TimelineTimelineCursor" && entry.content.cursorType === "Bottom") {
+        if (entry.content?.cursorType === "Bottom") {
           nextCursor = entry.content.value;
           continue;
         }
 
-        if (entry.content?.entryType !== "TimelineTimelineItem") {
-          continue;
-        }
-
-        const itemContent = entry.content.itemContent;
+        const itemContent = entry.content?.itemContent;
         if (!itemContent) continue;
+        const clientEventInfo = itemContent.clientEventInfo || itemContent.notificationResult?.result?.clientEventInfo;
+        const element = clientEventInfo?.element || "";
 
-        // 2. Identify the notification type (Kind) from clientEventInfo.element.
-        const element = itemContent.clientEventInfo?.element || "";
-        let kind: NotificationKind = "unknown";
+        let kind: NotificationKind = 'unknown';
+        if (element.includes('like')) kind = 'like';
+        else if (element.includes('retweet')) kind = 'retweet';
+        else if (element.includes('reply')) kind = 'reply';
+        else if (element.includes('follow')) kind = 'follow';
+        else if (element.includes('mention')) kind = 'mention';
+        else if (element.includes('quote')) kind = 'quote';
 
-        if (element.includes("like")) kind = "like";
-        else if (element.includes("retweet")) kind = "retweet";
-        else if (element.includes("reply")) kind = "reply";
-        else if (element.includes("follow")) kind = "follow";
-        else if (element.includes("quote")) kind = "quote";
-        else if (element.includes("mention")) kind = "mention";
-
-        // Helper to extract user information
-        const extractUser = (userResult: any): Tweet["author"] | null => {
-          const user = userResult?.result;
-          if (!user) return null;
-          const legacy = user.legacy || {};
-          return {
-            id: user.rest_id,
-            name: user.core?.name || legacy.name || "",
-            username: user.core?.screen_name || legacy.screen_name || "",
-            profileImageUrl: user.avatar?.image_url || legacy.profile_image_url_https || "",
-          };
-        };
-
-        // 3. Process TimelineNotification (aggregated notifications like likes).
         if (itemContent.itemType === "TimelineNotification") {
-          const fromUsers = (itemContent.from_users || [])
-            .map((u: any) => extractUser(u.user_results))
-            .filter((u: any): u is Tweet["author"] => u !== null);
+          const result = itemContent.notificationResult?.result;
+
+          const fromUsers = (result?.from_users || []).map((u: any) => {
+            const user = u.user_results?.result;
+            return {
+              id: user?.rest_id,
+              name: user?.core?.name || user?.legacy?.name,
+              username: user?.core?.screen_name || user?.legacy?.screen_name,
+              profileImageUrl: user?.legacy?.profile_image_url_https,
+            };
+          });
 
           notifications.push({
             id: entry.entryId,
-            kind: kind,
-            fromUsers: fromUsers,
-            text: itemContent.rich_message?.text, // "e.g., XX liked your tweet"
-            timestamp: itemContent.timestamp_ms ? new Date(parseInt(itemContent.timestamp_ms)).toISOString() : "",
+            kind,
+            timestamp: result?.timestamp_ms ? new Date(parseInt(result.timestamp_ms)).toISOString() : "",
+            fromUsers,
+            text: result?.message?.text || "",
           });
-        }
-        // 4. Process TimelineTweet (replies, etc.).
-        else if (itemContent.itemType === "TimelineTweet") {
+        } else if (itemContent.itemType === "TimelineTweet") {
           const tweetResult = itemContent.tweet_results?.result;
-          const sourceTweet = extractTweetFromResult(tweetResult);
+          const tweet = extractTweetFromResult(tweetResult);
 
-          if (sourceTweet) {
+          if (tweet) {
             notifications.push({
               id: entry.entryId,
-              kind: kind === "unknown" ? "reply" : kind,
-              sourceTweet: sourceTweet,
-              fromUsers: [sourceTweet.author],
-              timestamp: new Date(sourceTweet.createdAt).toISOString(),
-              text: sourceTweet.text
+              kind: kind === 'unknown' ? 'reply' : kind,
+              timestamp: tweet.createdAt,
+              fromUsers: [tweet.author],
+              sourceTweet: tweet,
+              text: tweet.text,
             });
           }
         }
       }
     }
   }
+
   return { notifications, nextCursor };
 }

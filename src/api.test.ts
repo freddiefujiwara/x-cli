@@ -108,31 +108,23 @@ function createMockApiResponse(...notificationTypes: ("like" | "reply")[]) {
           entryType: "TimelineTimelineItem",
           itemContent: {
             itemType: "TimelineNotification",
-            id: `notification-id-${index}`,
-            timestamp_ms: "1672531200000",
-            clientEventInfo: { element: "like" },
-            from_users: [
-              {
-                user_results: {
-                  result: {
-                    rest_id: "101",
-                    legacy: { name: "Test User", screen_name: "testuser" },
-                  },
-                },
-              },
-            ],
-            template: {
-              target_objects: [
-                {
-                  tweet_results: {
-                    result: {
-                      rest_id: "11111",
-                      legacy: { full_text: "This is the target tweet" },
-                      core: { user_results: { result: { legacy: {} } } },
+            notificationResult: {
+              result: {
+                id: `notification-id-${index}`,
+                timestamp_ms: "1672531200000",
+                clientEventInfo: { element: "like" },
+                message: { text: "Test User liked your tweet" },
+                from_users: [
+                  {
+                    user_results: {
+                      result: {
+                        rest_id: "101",
+                        legacy: { name: "Test User", screen_name: "testuser" },
+                      },
                     },
                   },
-                },
-              ],
+                ],
+              },
             },
           },
         },
