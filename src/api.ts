@@ -1,4 +1,3 @@
-import { writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { AuthConfig, buildCookieHeader } from "./auth.js";
 import { ClientTransaction, handleXMigration } from "x-client-transaction-id";
@@ -577,7 +576,40 @@ export function extractNotificationMessage(entry: any): string | undefined {
   return typeof msg === "string" ? msg : undefined;
 }
 
+/**
+ * Converts the 'element' string from an API response to a NotificationKind.
+ * @param element The value of `clientEventInfo.element` from the JSON response.
+ */
+export function mapElementToNotificationKind(element?: string): NotificationKind {
+  switch (element) {
+    case "users_liked_your_tweet":
+      return "like";
+    case "user_replied_to_your_tweet":
+      return "reply";
+    case "user_mentioned_you":
+      return "mention";
+    case "users_retweeted_your_tweet":
+      return "retweet";
+    case "user_followed_you":
+      return "follow";
+    case "user_quoted_your_tweet":
+      return "quote";
+    case "user_reposted_your_tweet":
+      return "repost";
+    default:
+      return "unknown";
+  }
+}
+
 export function classifyNotificationKind(entry: any, tweet?: Tweet): NotificationKind {
+  // --- New primary classification method ---
+  const element = getByPath(entry, "content.clientEventInfo.element") as string | undefined;
+  const kindFromElement = mapElementToNotificationKind(element);
+  if (kindFromElement !== "unknown") {
+    return kindFromElement;
+  }
+
+  // --- Fallback to original logic ---
   const typenameNode = findFirstDeep(entry, (n) => isObject(n) && typeof n.__typename === "string", 6);
   const typename = (typenameNode?.__typename as string | undefined)?.toLowerCase() ?? "";
 
