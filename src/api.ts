@@ -1,4 +1,3 @@
-import { writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { AuthConfig, buildCookieHeader } from "./auth.js";
 import { ClientTransaction, handleXMigration } from "x-client-transaction-id";
@@ -578,8 +577,8 @@ export function extractNotificationMessage(entry: any): string | undefined {
 }
 
 /**
- * レスポンス内の element 文字列を NotificationKind に変換する
- * @param element JSONの clientEventInfo.element の値
+ * Converts the 'element' string from an API response to a NotificationKind.
+ * @param element The value of `clientEventInfo.element` from the JSON response.
  */
 export function mapElementToNotificationKind(element?: string): NotificationKind {
   switch (element) {
@@ -593,7 +592,6 @@ export function mapElementToNotificationKind(element?: string): NotificationKind
       return "retweet";
     case "user_followed_you":
       return "follow";
-    // 必要に応じて以下のケースも追加（レスポンスに含まれる可能性がある場合）
     case "user_quoted_your_tweet":
       return "quote";
     case "user_reposted_your_tweet":
