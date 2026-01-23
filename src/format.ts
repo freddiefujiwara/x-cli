@@ -113,7 +113,7 @@ export function formatThreadJson(thread: TweetThread, options?: { color?: boolea
 
 // ===== Notifications =====
 
-function formatUsers(users: Tweet['author'][]): string {
+function formatUsers(users: Tweet["author"][]): string {
   if (users.length === 0) return "";
   const firstUser = users[0];
   const first = `${COLORS.bold}${firstUser.name || firstUser.username}${COLORS.reset} ${COLORS.gray}@${firstUser.username}${COLORS.reset}`;
@@ -167,7 +167,7 @@ function formatNotification(notification: Notification): string {
 
   // For replies, the `text` is the tweet content, so we use a generic action.
   // For other types, the API `text` is usually more descriptive.
-  const messageStr = (kind === 'reply' || kind === 'quote') ? actionText : (text || actionText);
+  const messageStr = (kind === "reply" || kind === "quote") ? actionText : (text || actionText);
 
   const header = `${icon} ${userStr} ${messageStr} ${timeStr}`;
 

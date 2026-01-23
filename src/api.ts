@@ -1,4 +1,3 @@
-import { writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { AuthConfig, buildCookieHeader } from "./auth.js";
 import { ClientTransaction, handleXMigration } from "x-client-transaction-id";
@@ -462,15 +461,15 @@ export function parseNotificationTimelineResponse(data: any): { notifications: N
 
           // Helper to extract user information
           const extractUser = (userResult: any) => {
-             const user = userResult?.result;
-             if (!user) return null;
-             const legacy = user.legacy || {};
-             return {
-               id: user.rest_id,
-               name: user.core?.name || legacy.name || "",
-               username: user.core?.screen_name || legacy.screen_name || "",
-               profileImageUrl: user.avatar?.image_url || legacy.profile_image_url_https || "",
-             };
+            const user = userResult?.result;
+            if (!user) return null;
+            const legacy = user.legacy || {};
+            return {
+              id: user.rest_id,
+              name: user.core?.name || legacy.name || "",
+              username: user.core?.screen_name || legacy.screen_name || "",
+              profileImageUrl: user.avatar?.image_url || legacy.profile_image_url_https || "",
+            };
           };
 
           if (itemContent.itemType === "TimelineNotification") {
@@ -493,21 +492,21 @@ export function parseNotificationTimelineResponse(data: any): { notifications: N
             });
 
           } else if (itemContent.itemType === "TimelineTweet") {
-             // When the tweet itself is the notification (e.g., a reply)
-             const tweetResult = itemContent.tweet_results?.result;
-             const sourceTweet = extractTweetFromResult(tweetResult);
+            // When the tweet itself is the notification (e.g., a reply)
+            const tweetResult = itemContent.tweet_results?.result;
+            const sourceTweet = extractTweetFromResult(tweetResult);
 
-             if (sourceTweet) {
-               notifications.push({
-                 id: entry.entryId,
-                 kind: kind === "unknown" ? "reply" : kind, // Default to 'reply'
-                 timestamp: sourceTweet.createdAt,
-                 fromUsers: [sourceTweet.author],
-                 sourceTweet: sourceTweet,
-                 // targetTweet can sometimes be inferred from in_reply_to_status_id, but full data is often missing
-                 text: sourceTweet.text,
-               });
-             }
+            if (sourceTweet) {
+              notifications.push({
+                id: entry.entryId,
+                kind: kind === "unknown" ? "reply" : kind, // Default to 'reply'
+                timestamp: sourceTweet.createdAt,
+                fromUsers: [sourceTweet.author],
+                sourceTweet: sourceTweet,
+                // targetTweet can sometimes be inferred from in_reply_to_status_id, but full data is often missing
+                text: sourceTweet.text,
+              });
+            }
           }
         }
       }
