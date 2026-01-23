@@ -352,302 +352,50 @@ export function extractTweetId(input: string): string {
 }
 // ===== Notifications Timeline =====
 
-const NOTIFICATIONS_TIMELINE_QUERY_ID = "c1Zz6Vb2QqYuFeafTqVjAQ";
-
-export type NotificationsTimelineType = "All" | "Verified" | "Mentions";
-
+// Defines the kinds of notifications
 export type NotificationKind =
   | "like"
   | "retweet"
   | "reply"
-  | "mention"
-  | "follow"
   | "quote"
-  | "repost"
+  | "follow"
+  | "mention"
   | "unknown";
 
-export interface NotificationActor {
-  id?: string;
-  name?: string;
-  username?: string;
-  profileImageUrl?: string;
-}
-
+// Interface for a notification object
 export interface Notification {
-  id: string; // entryId 等
-  sortIndex?: string;
+  id: string;
   kind: NotificationKind;
-  actors: NotificationActor[];
-  tweet?: Tweet;
-  tweetId?: string;
-  message?: string;
-  raw: any;
+  timestamp: string;
+  fromUsers: Tweet["author"][]; // List of users who sent the notification
+  targetTweet?: Tweet;          // Your tweet that was liked or replied to
+  sourceTweet?: Tweet;          // The other user's tweet, like a reply or quote tweet
+  text?: string;                // The notification message (e.g., "X liked your tweet")
 }
 
-export interface NotificationsPage {
-  entries: any[];
-  topCursor?: string;
-  bottomCursor?: string;
-  markUnreadGreaterThanSortIndex?: string;
-  notifications: Notification[];
-}
+const NOTIFICATION_TIMELINE_QUERY_ID = "c1Zz6Vb2QqYuFeafTqVjAQ";
 
-// ---- Deep helpers ----
-
-function isObject(v: any): v is Record<string, any> {
-  return v !== null && typeof v === "object";
-}
-
-export function getByPath(obj: any, path: string): any {
-  if (path === "") return obj;
-  const parts = path.split(".");
-  let cur = obj;
-  for (const p of parts) {
-    if (!isObject(cur) || !(p in cur)) return undefined;
-    cur = cur[p];
-  }
-  return cur;
-}
-
-export function findFirstDeep(obj: any, predicate: (node: any) => boolean, maxDepth = 8): any | undefined {
-  const seen = new Set<any>();
-
-  function dfs(node: any, depth: number): any | undefined {
-    if (depth > maxDepth) return undefined;
-    if (!isObject(node)) return undefined;
-    if (seen.has(node)) return undefined;
-    seen.add(node);
-
-    if (predicate(node)) return node;
-
-    for (const k of Object.keys(node)) {
-      const v = node[k];
-      if (isObject(v)) {
-        const found = dfs(v, depth + 1);
-        if (found !== undefined) return found;
-      } else if (Array.isArray(v)) {
-        for (const item of v) {
-          const found = dfs(item, depth + 1);
-          if (found !== undefined) return found;
-        }
-      }
-    }
-    return undefined;
-  }
-
-  return dfs(obj, 0);
-}
-
-export function collectDeep(obj: any, predicate: (node: any) => boolean, maxDepth = 8, limit = 10): any[] {
-  const results: any[] = [];
-  const seen = new Set<any>();
-
-  function dfs(node: any, depth: number) {
-    if (results.length >= limit) return;
-    if (depth > maxDepth) return;
-    if (!isObject(node)) return;
-    if (seen.has(node)) return;
-    seen.add(node);
-
-    if (predicate(node)) results.push(node);
-
-    for (const k of Object.keys(node)) {
-      const v = node[k];
-      if (isObject(v)) dfs(v, depth + 1);
-      else if (Array.isArray(v)) for (const item of v) dfs(item, depth + 1);
-    }
-  }
-
-  dfs(obj, 0);
-  return results;
-}
-
-// ---- Actors ----
-
-export function extractActorFromUserResult(userResult: any): NotificationActor | null {
-  if (!userResult || userResult.__typename !== "User") return null;
-
-  const legacy = userResult.legacy || {};
-  const core = userResult.core || {};
-  return {
-    id: userResult.rest_id,
-    name: core.name || legacy.name,
-    username: core.screen_name || legacy.screen_name,
-    profileImageUrl: userResult.avatar?.image_url || legacy.profile_image_url_https,
-  };
-}
-
-export function extractActors(entry: any): NotificationActor[] {
-  const candidatePaths = [
-    "content.itemContent.user_results.result",
-    "content.itemContent.notification_results.result.user_results.result",
-    "content.itemContent.notification.user_results.result",
-    "content.itemContent.notification_results.result.actors",
-  ];
-
-  const actors: NotificationActor[] = [];
-
-  for (const p of candidatePaths) {
-    const v = getByPath(entry, p);
-    if (!v) continue;
-
-    if (Array.isArray(v)) {
-      for (const item of v) {
-        const maybeUser = item?.user_results?.result ?? item;
-        const a = extractActorFromUserResult(maybeUser);
-        if (a) actors.push(a);
-      }
-    } else {
-      const maybeUser = v?.user_results?.result ?? v;
-      const a = extractActorFromUserResult(maybeUser);
-      if (a) actors.push(a);
-    }
-  }
-
-  // fallback deep search
-  const userNodes = collectDeep(
-    entry,
-    (n) => isObject(n) && n.user_results && n.user_results.result && isObject(n.user_results.result),
-    7,
-    10
-  );
-
-  for (const n of userNodes) {
-    const a = extractActorFromUserResult(n.user_results.result);
-    if (a) actors.push(a);
-  }
-
-  // dedupe
-  const uniq = new Map<string, NotificationActor>();
-  for (const a of actors) {
-    const key = `${a.id ?? ""}:${a.username ?? ""}:${a.name ?? ""}`;
-    if (!uniq.has(key)) uniq.set(key, a);
-  }
-  return [...uniq.values()];
-}
-
-// ---- Tweet extraction (re-use extractTweetFromResult) ----
-
-export function extractTweetFromNotificationEntry(entry: any): { tweet?: Tweet; tweetId?: string } {
-  const candidatePaths = [
-    "content.itemContent.tweet_results.result",
-    "content.itemContent.notification_results.result.tweet_results.result",
-    "content.itemContent.notification.tweet_results.result",
-    "content.itemContent.itemContent.tweet_results.result",
-  ];
-
-  for (const p of candidatePaths) {
-    const tr = getByPath(entry, p);
-    const t = extractTweetFromResult(tr);
-    if (t) return { tweet: t, tweetId: t.id };
-  }
-
-  const tweetResultsNode = findFirstDeep(
-    entry,
-    (n) => isObject(n) && n.tweet_results && isObject(n.tweet_results) && ("result" in n.tweet_results),
-    8
-  );
-
-  if (tweetResultsNode?.tweet_results?.result) {
-    const t = extractTweetFromResult(tweetResultsNode.tweet_results.result);
-    if (t) return { tweet: t, tweetId: t.id };
-
-    const restId = tweetResultsNode.tweet_results.result?.rest_id;
-    if (typeof restId === "string") return { tweetId: restId };
-  }
-
-  const restIdNode = findFirstDeep(
-    entry,
-    (n) => isObject(n) && typeof n.rest_id === "string" && /^\d+$/.test(n.rest_id),
-    6
-  );
-  if (restIdNode?.rest_id) return { tweetId: restIdNode.rest_id };
-
-  return {};
-}
-
-// ---- Kind/message ----
-
-export function extractNotificationMessage(entry: any): string | undefined {
-  const msg =
-    getByPath(entry, "content.itemContent.message.text") ??
-    getByPath(entry, "content.itemContent.notification_results.result.message.text") ??
-    getByPath(entry, "content.itemContent.notification.message.text");
-
-  return typeof msg === "string" ? msg : undefined;
-}
-
-export function classifyNotificationKind(entry: any, tweet?: Tweet): NotificationKind {
-  const typenameNode = findFirstDeep(entry, (n) => isObject(n) && typeof n.__typename === "string", 6);
-  const typename = (typenameNode?.__typename as string | undefined)?.toLowerCase() ?? "";
-
-  const entryId = String(entry?.entryId ?? "").toLowerCase();
-  const msg = (extractNotificationMessage(entry) ?? "").toLowerCase();
-
-  if (typename.includes("follow") || msg.includes("followed you") || entryId.includes("follow")) return "follow";
-  if (typename.includes("favorite") || typename.includes("like") || msg.includes("liked your") || entryId.includes("like"))
-    return "like";
-  if (typename.includes("retweet") || typename.includes("repost") || msg.includes("reposted") || msg.includes("retweeted") || entryId.includes("retweet"))
-    return "retweet";
-
-  if (tweet?.isReply) return "reply";
-  if (typename.includes("reply") || msg.includes("replied to") || entryId.includes("reply")) return "reply";
-
-  if (typename.includes("mention") || msg.includes("mentioned you") || entryId.includes("mention")) return "mention";
-  if (typename.includes("quote") || msg.includes("quoted") || entryId.includes("quote")) return "quote";
-
-  return "unknown";
-}
-
-// ---- Entry -> Notification ----
-
-export function normalizeNotificationEntry(entry: any): Notification | null {
-  const entryId = String(entry?.entryId ?? "");
-  if (!entryId) return null;
-  if (entryId.startsWith("cursor-")) return null;
-
-  const sortIndex = typeof entry?.sortIndex === "string" ? entry.sortIndex : undefined;
-
-  const actors = extractActors(entry);
-  const { tweet, tweetId } = extractTweetFromNotificationEntry(entry);
-  const message = extractNotificationMessage(entry);
-  const kind = classifyNotificationKind(entry, tweet);
-
-  return {
-    id: entryId,
-    sortIndex,
-    kind,
-    actors,
-    tweet,
-    tweetId,
-    message,
-    raw: entry,
-  };
-}
-
-// ---- Fetch NotificationsTimeline (auth required) ----
-
-export async function getNotificationsTimeline(
+export async function getNotificationTimeLine(
   auth: AuthConfig,
-  opts?: {
-    timelineType?: NotificationsTimelineType;
-    cursor?: string;
-    count?: number;
-  }
-): Promise<NotificationsPage> {
-  const variables: Record<string, any> = {
-    timeline_type: opts?.timelineType ?? "All",
-    count: opts?.count ?? 40,
+  cursor?: string
+): Promise<{ notifications: Notification[]; nextCursor?: string }> {
+  const variables: any = {
+    count: 20,
+    includePromotedContent: false,
+    withSafetyModeUserFields: true,
   };
-  if (opts?.cursor) variables.cursor = opts.cursor;
+
+  if (cursor) {
+    variables.cursor = cursor;
+  }
 
   const params = new URLSearchParams({
     variables: JSON.stringify(variables),
     features: JSON.stringify(FEATURES),
+    fieldToggles: JSON.stringify(FIELD_TOGGLES),
   });
 
-  const url = `${BASE_URL}/${NOTIFICATIONS_TIMELINE_QUERY_ID}/NotificationsTimeline?${params}`;
-
+  const url = `${BASE_URL}/${NOTIFICATION_TIMELINE_QUERY_ID}/NotificationsTimeline?${params}`;
   const clientUuid = randomUUID();
 
   const response = await fetch(url, {
@@ -662,64 +410,108 @@ export async function getNotificationsTimeline(
       "x-twitter-active-user": "yes",
       "x-twitter-auth-type": "OAuth2Session",
       "x-twitter-client-language": "en",
-      "user-agent":
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     },
   });
 
   if (!response.ok) {
     const text = await response.text();
-    const error = new Error(`Notifications API request failed (${response.status}): ${text}`) as Error & {
-      status: number;
-    };
-    error.status = response.status;
-    throw error;
+    throw new Error(`API request failed (${response.status}): ${text}`);
   }
 
   const data = await response.json();
-  if (data.errors) throw new Error(`API returned errors: ${JSON.stringify(data.errors)}`);
 
-  return parseNotificationsTimelineResponse(data);
+  if (data.errors) {
+    throw new Error(`API returned errors: ${JSON.stringify(data.errors)}`);
+  }
+
+  return parseNotificationTimelineResponse(data);
 }
 
-export function parseNotificationsTimelineResponse(data: any): NotificationsPage {
-  const instructions =
-    getByPath(data, "data.viewer_v2.user_results.result.notification_timeline.timeline.instructions") ?? [];
+export function parseNotificationTimelineResponse(data: any): { notifications: Notification[]; nextCursor?: string } {
+  const instructions = data?.data?.viewer_v2?.user_results?.result?.notification_timeline?.timeline?.instructions || [];
+  const notifications: Notification[] = [];
+  let nextCursor: string | undefined;
 
-  const entries: any[] = [];
-  let topCursor: string | undefined;
-  let bottomCursor: string | undefined;
-  let markUnreadGreaterThanSortIndex: string | undefined;
+  for (const instruction of instructions) {
+    if (instruction.type === "TimelineAddEntries") {
+      for (const entry of instruction.entries) {
+        // Get cursor
+        if (entry.content?.entryType === "TimelineTimelineCursor" && entry.content.cursorType === "Bottom") {
+          nextCursor = entry.content.value;
+          continue;
+        }
 
-  for (const ins of instructions) {
-    if (ins?.type === "TimelineAddEntries" && Array.isArray(ins.entries)) {
-      for (const e of ins.entries) {
-        entries.push(e);
+        // Process notification items
+        if (entry.content?.entryType === "TimelineTimelineItem") {
+          const itemContent = entry.content.itemContent;
 
-        const entryId = e?.entryId ?? "";
-        const content = e?.content;
+          if (!itemContent) continue;
 
-        if (entryId.startsWith("cursor-top-") && content?.value) topCursor = content.value;
-        if (entryId.startsWith("cursor-bottom-") && content?.value) bottomCursor = content.value;
+          // Determine notification kind from clientEventInfo.element
+          const element = itemContent.clientEventInfo?.element || "";
+          let kind: NotificationKind = "unknown";
+
+          if (element.includes("like")) kind = "like";
+          else if (element.includes("retweet")) kind = "retweet";
+          else if (element.includes("reply")) kind = "reply";
+          else if (element.includes("follow")) kind = "follow";
+          else if (element.includes("mention")) kind = "mention";
+          else if (element.includes("quote")) kind = "quote";
+
+          // Helper to extract user information
+          const extractUser = (userResult: any) => {
+             const user = userResult?.result;
+             if (!user) return null;
+             const legacy = user.legacy || {};
+             return {
+               id: user.rest_id,
+               name: user.core?.name || legacy.name || "",
+               username: user.core?.screen_name || legacy.screen_name || "",
+               profileImageUrl: user.avatar?.image_url || legacy.profile_image_url_https || "",
+             };
+          };
+
+          if (itemContent.itemType === "TimelineNotification") {
+            // Aggregated notifications (e.g., "X and Y liked your tweet")
+            const fromUsers = (itemContent.from_users || [])
+              .map((u: any) => extractUser(u.user_results))
+              .filter((u: any) => u !== null);
+
+            // The target tweet (your own tweet)
+            const targetTweetResult = itemContent.template?.target_objects?.[0]?.tweet_results?.result;
+            const targetTweet = extractTweetFromResult(targetTweetResult);
+
+            notifications.push({
+              id: itemContent.id || entry.entryId,
+              kind,
+              timestamp: itemContent.timestamp_ms ? new Date(parseInt(itemContent.timestamp_ms)).toISOString() : "",
+              fromUsers,
+              targetTweet: targetTweet || undefined,
+              text: itemContent.rich_message?.text || "",
+            });
+
+          } else if (itemContent.itemType === "TimelineTweet") {
+             // When the tweet itself is the notification (e.g., a reply)
+             const tweetResult = itemContent.tweet_results?.result;
+             const sourceTweet = extractTweetFromResult(tweetResult);
+
+             if (sourceTweet) {
+               notifications.push({
+                 id: entry.entryId,
+                 kind: kind === "unknown" ? "reply" : kind, // Default to 'reply'
+                 timestamp: sourceTweet.createdAt,
+                 fromUsers: [sourceTweet.author],
+                 sourceTweet: sourceTweet,
+                 // targetTweet can sometimes be inferred from in_reply_to_status_id, but full data is often missing
+                 text: sourceTweet.text,
+               });
+             }
+          }
+        }
       }
     }
-
-    if (ins?.type === "TimelineMarkEntriesUnreadGreaterThanSortIndex" && ins?.sort_index) {
-      markUnreadGreaterThanSortIndex = ins.sort_index;
-    }
   }
 
-  const notifications: Notification[] = [];
-  for (const e of entries) {
-    const n = normalizeNotificationEntry(e);
-    if (n) notifications.push(n);
-  }
-
-  return {
-    entries,
-    topCursor,
-    bottomCursor,
-    markUnreadGreaterThanSortIndex,
-    notifications,
-  };
+  return { notifications, nextCursor };
 }
