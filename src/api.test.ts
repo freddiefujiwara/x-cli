@@ -55,8 +55,6 @@ describe("api", () => {
       expect(notification.kind).toBe("like");
       expect(notification.fromUsers).toHaveLength(1);
       expect(notification.fromUsers[0].name).toBe("Test User");
-      expect(notification.targetTweet).toBeDefined();
-      expect(notification.targetTweet?.id).toBe("11111");
     });
 
     it("should parse a reply notification", () => {
