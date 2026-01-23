@@ -380,6 +380,7 @@ export async function getNotificationTimeLine(
   cursor?: string
 ): Promise<{ notifications: Notification[]; nextCursor?: string }> {
   const variables: any = {
+    timeline_type: "All",
     count: 20,
     includePromotedContent: false,
     withSafetyModeUserFields: true,
