@@ -179,7 +179,14 @@ export function formatNotificationsPretty(page: NotificationsPage): string {
 }
 
 export function formatNotificationsJson(page: NotificationsPage, options?: { color?: boolean }): string {
-  const json = JSON.stringify(page.notifications, null, 2);
+  const simplifiedNotifications = page.notifications.map((n) => ({
+    id: n.id,
+    kind: n.kind,
+    actors: n.actors,
+    tweet: n.tweet,
+    message: n.message,
+  }));
+  const json = JSON.stringify(simplifiedNotifications, null, 2);
   const useColor = options?.color ?? process.stdout.isTTY;
   return useColor ? highlightJson(json) : json;
 }
