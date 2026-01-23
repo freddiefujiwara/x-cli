@@ -20,6 +20,7 @@ const createMockTweet = (overrides: Partial<Tweet> = {}): Tweet => ({
     bookmarks: 3
   },
   isReply: false,
+  isRetweet: false,
   ...overrides
 });
 

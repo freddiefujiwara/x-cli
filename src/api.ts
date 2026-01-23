@@ -77,7 +77,31 @@ export interface Tweet {
     bookmarks: number;
   };
   isReply: boolean;
+  isRetweet: boolean;
   inReplyToTweetId?: string;
+}
+
+export enum NotificationKind {
+  Like = "like",
+  Retweet = "retweet",
+  Reply = "reply",
+  Follow = "follow",
+  Mention = "mention",
+  Quote = "quote",
+  Unknown = "unknown",
+}
+
+export interface Notification {
+  id: string;
+  kind: NotificationKind;
+  timestamp: string;
+  users: {
+    id: string;
+    name: string;
+    username: string;
+  }[];
+  tweet?: Tweet;
+  text?: string;
 }
 
 export interface TweetThread {
@@ -123,6 +147,7 @@ function extractTweetFromResult(result: any): Tweet | null {
       bookmarks: legacy.bookmark_count || 0,
     },
     isReply: !!legacy.in_reply_to_status_id_str,
+    isRetweet: legacy.retweeted || false,
     inReplyToTweetId: legacy.in_reply_to_status_id_str,
   };
 }
@@ -346,4 +371,58 @@ export function extractTweetId(input: string): string {
     `Invalid tweet ID or URL: "${input}"\n` +
       "Expected a tweet ID (e.g., \"1234567890\") or URL (e.g., \"https://x.com/user/status/1234567890\")"
   );
+}
+
+export function mapElementToNotificationKind(element: string): NotificationKind {
+  if (element.includes("users_liked_your_tweet")) {
+    return NotificationKind.Like;
+  } else if (element.includes("users_retweeted_your_tweet")) {
+    return NotificationKind.Retweet;
+  } else {
+    return NotificationKind.Unknown;
+  }
+}
+
+export function parseNotificationTimelineResponse(jsonData: any): Notification[] {
+  const instructions = jsonData?.data?.viewer_v2?.user_results?.result?.notification_timeline?.timeline?.instructions || [];
+  const addEntriesInstruction = instructions.find((inst: any) => inst.type === "TimelineAddEntries");
+
+  if (!addEntriesInstruction || !addEntriesInstruction.entries) {
+    return [];
+  }
+
+  const entries = addEntriesInstruction.entries;
+  const notifications: Notification[] = [];
+
+  for (const entry of entries) {
+    const itemContent = entry.content?.itemContent;
+
+    if (itemContent?.notification_result?.result) {
+      const result = itemContent.notification_result.result;
+      const kind = mapElementToNotificationKind(
+        result.clientEventInfo?.element || ""
+      );
+      const users =
+        result.from_users_results?.results
+          ?.map((u: any) => ({
+            id: u.result?.rest_id,
+            name: u.result?.legacy?.name,
+            username: u.result?.legacy?.screen_name,
+          }))
+          .filter((u: any) => u.id && u.name && u.username) || [];
+
+      if (kind !== NotificationKind.Unknown && users.length > 0) {
+        notifications.push({
+          id: result.id,
+          kind,
+          timestamp: result.timestamp_ms,
+          users,
+          text: result.message?.text,
+          tweet: extractTweetFromResult(result.tweet) ?? undefined,
+        });
+      }
+    }
+  }
+
+  return notifications;
 }

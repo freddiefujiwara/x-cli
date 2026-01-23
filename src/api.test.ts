@@ -1,6 +1,73 @@
-import { extractTweetId } from "./api.js";
+import { parseNotificationTimelineResponse, NotificationKind, extractTweetId } from "./api.js";
 
 describe("api", () => {
+  describe("parseNotificationTimelineResponse", () => {
+    it("should correctly identify a retweet from a notification_result", () => {
+      const mockJsonData = {
+        data: {
+          viewer_v2: {
+            user_results: {
+              result: {
+                notification_timeline: {
+                  timeline: {
+                    instructions: [
+                      {
+                        type: "TimelineAddEntries",
+                        entries: [
+                          {
+                            entryId: "notification-123",
+                            content: {
+                              itemContent: {
+                                notification_result: {
+                                  result: {
+                                    id: "notif-1",
+                                    timestamp_ms: "1678886400000",
+                                    clientEventInfo: {
+                                      element: "users_retweeted_your_tweet",
+                                    },
+                                    from_users_results: {
+                                      results: [
+                                        {
+                                          result: {
+                                            rest_id: "987",
+                                            legacy: {
+                                              name: "Retweeter",
+                                              screen_name: "retweeter_user",
+                                            },
+                                          },
+                                        },
+                                      ],
+                                    },
+                                    tweet: {
+                                      __typename: "Tweet",
+                                      rest_id: "54321",
+                                      core: { user_results: { result: { rest_id: "author1" } } },
+                                      legacy: { full_text: "Original tweet", retweeted: false },
+                                    },
+                                  },
+                                },
+                              },
+                            },
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                },
+              },
+            },
+          },
+        },
+      };
+
+      const notifications = parseNotificationTimelineResponse(mockJsonData);
+      expect(notifications.length).toBe(1);
+      expect(notifications[0].kind).toBe(NotificationKind.Retweet);
+      expect(notifications[0].users[0].name).toBe("Retweeter");
+      expect(notifications[0].tweet?.id).toBe("54321");
+    });
+  });
+
   describe("extractTweetId", () => {
     it("should extract tweet ID from x.com URL", () => {
       const url = "https://x.com/user/status/1234567890";
