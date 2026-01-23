@@ -444,7 +444,7 @@ export function parseNotificationTimelineResponse(data: any): { notifications: N
         }
 
         if (entry.content?.entryType !== "TimelineTimelineItem") {
-            continue;
+          continue;
         }
 
         const itemContent = entry.content.itemContent;
@@ -462,23 +462,23 @@ export function parseNotificationTimelineResponse(data: any): { notifications: N
         else if (element.includes("mention")) kind = "mention";
 
         // Helper to extract user information
-        const extractUser = (userResult: any): Tweet['author'] | null => {
-            const user = userResult?.result;
-            if (!user) return null;
-            const legacy = user.legacy || {};
-            return {
-              id: user.rest_id,
-              name: user.core?.name || legacy.name || "",
-              username: user.core?.screen_name || legacy.screen_name || "",
-              profileImageUrl: user.avatar?.image_url || legacy.profile_image_url_https || "",
-            };
+        const extractUser = (userResult: any): Tweet["author"] | null => {
+          const user = userResult?.result;
+          if (!user) return null;
+          const legacy = user.legacy || {};
+          return {
+            id: user.rest_id,
+            name: user.core?.name || legacy.name || "",
+            username: user.core?.screen_name || legacy.screen_name || "",
+            profileImageUrl: user.avatar?.image_url || legacy.profile_image_url_https || "",
+          };
         };
 
         // 3. Process TimelineNotification (aggregated notifications like likes).
         if (itemContent.itemType === "TimelineNotification") {
           const fromUsers = (itemContent.from_users || [])
-              .map((u: any) => extractUser(u.user_results))
-              .filter((u: any): u is Tweet['author'] => u !== null);
+            .map((u: any) => extractUser(u.user_results))
+            .filter((u: any): u is Tweet["author"] => u !== null);
 
           notifications.push({
             id: entry.entryId,
