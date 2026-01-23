@@ -188,12 +188,51 @@ describe("notification data extraction", () => {
   });
 
   describe("classifyNotificationKind", () => {
-    it("should classify a like notification", () => {
+    // New tests for classification based on clientEventInfo.element
+    it.each([
+      ["users_liked_your_tweet", "like"],
+      ["user_replied_to_your_tweet", "reply"],
+      ["user_mentioned_you", "mention"],
+      ["users_retweeted_your_tweet", "retweet"],
+      ["user_followed_you", "follow"],
+      ["user_quoted_your_tweet", "quote"],
+      ["user_reposted_your_tweet", "repost"],
+      ["some_unknown_event", "unknown"],
+    ])("should classify kind based on element '%s' as '%s'", (element, expectedKind) => {
+      const entry = {
+        content: {
+          clientEventInfo: {
+            element: element,
+          },
+        },
+      };
+      expect(classifyNotificationKind(entry)).toBe(expectedKind);
+    });
+
+    it("should use fallback logic if element is missing", () => {
       const entry = { entryId: "notification-like-123" };
       expect(classifyNotificationKind(entry)).toBe("like");
     });
 
-    it("should classify a retweet notification", () => {
+    it("should return 'unknown' if element is unknown and fallback fails", () => {
+      const entry = {
+        content: {
+          clientEventInfo: {
+            element: "new_unhandled_event",
+          },
+        },
+        entryId: "some-random-id",
+      };
+      expect(classifyNotificationKind(entry)).toBe("unknown");
+    });
+
+    // Existing tests as fallback validation
+    it("should classify a like notification by fallback", () => {
+      const entry = { entryId: "notification-like-123" };
+      expect(classifyNotificationKind(entry)).toBe("like");
+    });
+
+    it("should classify a retweet notification by fallback", () => {
       const entry = {
         content: { itemContent: { __typename: "TimelineTimelineItemContentTweet" } },
         entryId: "notification-retweet-456",
@@ -201,7 +240,7 @@ describe("notification data extraction", () => {
       expect(classifyNotificationKind(entry)).toBe("retweet");
     });
 
-    it("should classify a follow notification", () => {
+    it("should classify a follow notification by fallback", () => {
       const entry = {
         content: {
           itemContent: {
