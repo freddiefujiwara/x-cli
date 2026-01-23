@@ -583,19 +583,28 @@ export function extractNotificationMessage(entry: any): string | undefined {
 export function mapElementToNotificationKind(element?: string): NotificationKind {
   switch (element) {
     case "users_liked_your_tweet":
+    case "users_liked_your_post":
       return "like";
-    case "user_replied_to_your_tweet":
-      return "reply";
-    case "user_mentioned_you":
-      return "mention";
+
     case "users_retweeted_your_tweet":
+    case "users_retweeted_your_post":
       return "retweet";
-    case "user_followed_you":
-      return "follow";
-    case "user_quoted_your_tweet":
-      return "quote";
+
     case "user_reposted_your_tweet":
       return "repost";
+
+    case "user_replied_to_your_tweet":
+      return "reply";
+
+    case "user_mentioned_you":
+      return "mention";
+
+    case "user_followed_you":
+      return "follow";
+
+    case "user_quoted_your_tweet":
+      return "quote";
+
     default:
       return "unknown";
   }
