@@ -624,11 +624,19 @@ export function classifyNotificationKind(entry: any, tweet?: Tweet): Notificatio
 
   const entryId = String(entry?.entryId ?? "").toLowerCase();
   const msg = (extractNotificationMessage(entry) ?? "").toLowerCase();
+  const richMessageIconId = getByPath(entry, "content.rich_message.icon.id") as string | undefined;
 
   if (typename.includes("follow") || msg.includes("followed you") || entryId.includes("follow")) return "follow";
   if (typename.includes("favorite") || typename.includes("like") || msg.includes("liked your") || entryId.includes("like"))
     return "like";
-  if (typename.includes("retweet") || typename.includes("repost") || msg.includes("reposted") || msg.includes("retweeted") || entryId.includes("retweet"))
+  if (
+    typename.includes("retweet") ||
+    typename.includes("repost") ||
+    msg.includes("reposted") ||
+    msg.includes("retweeted") ||
+    entryId.includes("retweet") ||
+    richMessageIconId?.includes("retweet")
+  )
     return "retweet";
 
   if (tweet?.isReply) return "reply";

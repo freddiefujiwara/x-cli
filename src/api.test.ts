@@ -240,6 +240,19 @@ describe("notification data extraction", () => {
       expect(classifyNotificationKind(entry)).toBe("retweet");
     });
 
+    it("should classify a retweet by rich_message icon id", () => {
+      const entry = {
+        content: {
+          rich_message: {
+            icon: {
+              id: "shared-صفحات-لل-retweet-v1-0",
+            },
+          },
+        },
+      };
+      expect(classifyNotificationKind(entry)).toBe("retweet");
+    });
+
     it("should classify a follow notification by fallback", () => {
       const entry = {
         content: {
