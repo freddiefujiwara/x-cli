@@ -1,4 +1,4 @@
-import type { Tweet, TweetThread, NotificationsPage, Notification, NotificationActor } from "./api.js";
+import type { Tweet, TweetThread, Notification } from "./api.js";
 
 const COLORS = {
   reset: "\x1b[0m",
@@ -113,22 +113,22 @@ export function formatThreadJson(thread: TweetThread, options?: { color?: boolea
 
 // ===== Notifications =====
 
-function formatActors(actors: NotificationActor[]): string {
-  if (actors.length === 0) return "";
-  const firstActor = actors[0];
-  const first = `${COLORS.bold}${firstActor.name || firstActor.username}${COLORS.reset} ${COLORS.gray}@${firstActor.username}${COLORS.reset}`;
+function formatUsers(users: Tweet['author'][]): string {
+  if (users.length === 0) return "";
+  const firstUser = users[0];
+  const first = `${COLORS.bold}${firstUser.name || firstUser.username}${COLORS.reset} ${COLORS.gray}@${firstUser.username}${COLORS.reset}`;
 
-  if (actors.length === 1) return first;
-  if (actors.length === 2) {
-    const secondActor = actors[1];
-    const second = `${COLORS.bold}${secondActor.name || secondActor.username}${COLORS.reset} ${COLORS.gray}@${secondActor.username}${COLORS.reset}`;
+  if (users.length === 1) return first;
+  if (users.length === 2) {
+    const secondUser = users[1];
+    const second = `${COLORS.bold}${secondUser.name || secondUser.username}${COLORS.reset} ${COLORS.gray}@${secondUser.username}${COLORS.reset}`;
     return `${first} and ${second}`;
   }
-  return `${first} and ${actors.length - 1} others`;
+  return `${first} and ${users.length - 1} others`;
 }
 
 function formatNotification(notification: Notification): string {
-  const { kind, actors, tweet, message } = notification;
+  const { kind, fromUsers, targetTweet, sourceTweet, text, timestamp } = notification;
 
   let icon = "";
   let actionText = "";
@@ -138,9 +138,8 @@ function formatNotification(notification: Notification): string {
       actionText = "liked your tweet";
       break;
     case "retweet":
-    case "repost":
       icon = `${COLORS.green}🔁${COLORS.reset}`;
-      actionText = "reposted your tweet";
+      actionText = "retweeted your tweet";
       break;
     case "follow":
       icon = `${COLORS.blue}👤${COLORS.reset}`;
@@ -148,7 +147,7 @@ function formatNotification(notification: Notification): string {
       break;
     case "reply":
       icon = `${COLORS.cyan}💬${COLORS.reset}`;
-      actionText = "replied to your tweet";
+      actionText = "replied";
       break;
     case "mention":
       icon = `${COLORS.cyan}🔔${COLORS.reset}`;
@@ -163,22 +162,34 @@ function formatNotification(notification: Notification): string {
       break;
   }
 
-  const actorStr = formatActors(actors);
-  const messageStr = message ? `"${message}"` : actionText;
+  const userStr = formatUsers(fromUsers);
+  const timeStr = `${COLORS.dim}${formatDate(timestamp)}${COLORS.reset}`;
 
-  const header = `${icon} ${actorStr} ${messageStr}`;
-  const tweetStr = tweet ? formatTweet(tweet, "  ") : null;
+  // For replies, the `text` is the tweet content, so we use a generic action.
+  // For other types, the API `text` is usually more descriptive.
+  const messageStr = (kind === 'reply' || kind === 'quote') ? actionText : (text || actionText);
 
-  return [header, tweetStr].filter(Boolean).join("\n");
+  const header = `${icon} ${userStr} ${messageStr} ${timeStr}`;
+
+  let tweetContent = null;
+  if (sourceTweet) {
+    // For replies, quotes, the main content is the source tweet
+    tweetContent = formatTweet(sourceTweet, "  ");
+  } else if (targetTweet) {
+    // For likes, retweets, it's the tweet that was acted upon
+    tweetContent = formatTweet(targetTweet, "  ");
+  }
+
+  return [header, tweetContent].filter(Boolean).join("\n");
 }
 
 
-export function formatNotificationsPretty(page: NotificationsPage): string {
+export function formatNotificationsPretty(page: { notifications: Notification[] }): string {
   const lines = page.notifications.map(formatNotification);
   return lines.join(`\n\n${COLORS.dim}---${COLORS.reset}\n\n`);
 }
 
-export function formatNotificationsJson(page: NotificationsPage, options?: { color?: boolean }): string {
+export function formatNotificationsJson(page: { notifications: Notification[] }, options?: { color?: boolean }): string {
   const json = JSON.stringify(page.notifications, null, 2);
   const useColor = options?.color ?? process.stdout.isTTY;
   return useColor ? highlightJson(json) : json;

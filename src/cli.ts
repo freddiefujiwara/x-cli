@@ -2,7 +2,7 @@
 
 import yargs from "yargs";
 import { hideBin } from "yargs/helpers";
-import { getTweetDetail, getTweetAsGuest, extractTweetId, getNotificationsTimeline } from "./api.js";
+import { getTweetDetail, getTweetAsGuest, extractTweetId, getNotificationTimeLine } from "./api.js";
 import { loadAuth, clearAuth } from "./storage.js";
 import { formatThreadPretty, formatThreadJson, formatNotificationsJson, formatNotificationsPretty } from "./format.js";
 import { getCompletionScript } from "./completions.js";
@@ -99,7 +99,7 @@ const cli = yargs(hideBin(process.argv))
           return;
         }
 
-        const page = await getNotificationsTimeline(auth!);
+        const page = await getNotificationTimeLine(auth!);
 
         if (argv.pretty) {
           console.log(formatNotificationsPretty(page));

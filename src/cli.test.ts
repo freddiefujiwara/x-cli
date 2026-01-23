@@ -1,10 +1,10 @@
 import { jest } from "@jest/globals";
 import type { AuthConfig } from "./auth.js";
-import type { NotificationsPage, NotificationKind } from "./api.js";
+import type { Notification, NotificationKind } from "./api.js";
 
 // Mocks
 const mockLoadAuth = jest.fn<() => Promise<AuthConfig | null>>();
-const mockGetNotificationsTimeline = jest.fn<() => Promise<NotificationsPage>>();
+const mockGetNotificationTimeLine = jest.fn<() => Promise<{ notifications: Notification[] }>>();
 const mockFormatNotificationsPretty = jest.fn<() => string>();
 const mockFormatNotificationsJson = jest.fn<() => string>();
 
@@ -14,7 +14,7 @@ jest.unstable_mockModule("./storage.js", () => ({
   clearAuth: jest.fn(),
 }));
 jest.unstable_mockModule("./api.js", () => ({
-  getNotificationsTimeline: mockGetNotificationsTimeline,
+  getNotificationTimeLine: mockGetNotificationTimeLine,
   getTweetDetail: jest.fn(),
   getTweetAsGuest: jest.fn(),
   extractTweetId: jest.fn((id) => id),
@@ -78,20 +78,20 @@ describe("x-cli notify command", () => {
     expect(mockLoadAuth).toHaveBeenCalledTimes(1);
     expect(consoleErrorSpy).toHaveBeenCalledWith("Login required. Please run 'x login' first.");
     expect(processExitSpy).toHaveBeenCalledWith(1);
-    expect(mockGetNotificationsTimeline).not.toHaveBeenCalled();
+    expect(mockGetNotificationTimeLine).not.toHaveBeenCalled();
   });
 
-  it("should call getNotificationsTimeline and default formatter when logged in", async () => {
+  it("should call getNotificationTimeLine and default formatter when logged in", async () => {
     const mockAuth = { authToken: "test-auth", csrfToken: "test-csrf" };
-    const mockPage = { notifications: [{ id: "1", kind: "like" as NotificationKind, actors: [], raw: {} }], entries: [] };
+    const mockPage = { notifications: [{ id: "1", kind: "like" as NotificationKind, fromUsers: [], timestamp: "2024-01-01T00:00:00.000Z" }] };
     mockLoadAuth.mockResolvedValue(mockAuth);
-    mockGetNotificationsTimeline.mockResolvedValue(mockPage);
+    mockGetNotificationTimeLine.mockResolvedValue(mockPage);
     mockFormatNotificationsJson.mockReturnValue("json output");
 
     await runCli(["notify"]);
 
     expect(mockLoadAuth).toHaveBeenCalledTimes(1);
-    expect(mockGetNotificationsTimeline).toHaveBeenCalledWith(mockAuth);
+    expect(mockGetNotificationTimeLine).toHaveBeenCalledWith(mockAuth);
     expect(mockFormatNotificationsJson).toHaveBeenCalledWith(mockPage);
     expect(consoleLogSpy).toHaveBeenCalledWith("json output");
     expect(processExitSpy).not.toHaveBeenCalled();
@@ -99,14 +99,14 @@ describe("x-cli notify command", () => {
 
   it("should use pretty formatter with --pretty flag", async () => {
     const mockAuth = { authToken: "test-auth", csrfToken: "test-csrf" };
-    const mockPage = { notifications: [{ id: "1", kind: "like" as NotificationKind, actors: [], raw: {} }], entries: [] };
+    const mockPage = { notifications: [{ id: "1", kind: "like" as NotificationKind, fromUsers: [], timestamp: "2024-01-01T00:00:00.000Z" }] };
     mockLoadAuth.mockResolvedValue(mockAuth);
-    mockGetNotificationsTimeline.mockResolvedValue(mockPage);
+    mockGetNotificationTimeLine.mockResolvedValue(mockPage);
     mockFormatNotificationsPretty.mockReturnValue("pretty output");
 
     await runCli(["notify", "--pretty"]);
 
-    expect(mockGetNotificationsTimeline).toHaveBeenCalledWith(mockAuth);
+    expect(mockGetNotificationTimeLine).toHaveBeenCalledWith(mockAuth);
     expect(mockFormatNotificationsPretty).toHaveBeenCalledWith(mockPage);
     expect(mockFormatNotificationsJson).not.toHaveBeenCalled();
     expect(consoleLogSpy).toHaveBeenCalledWith("pretty output");
@@ -116,11 +116,11 @@ describe("x-cli notify command", () => {
     const mockAuth = { authToken: "test-auth", csrfToken: "test-csrf" };
     const error = new Error("API request failed");
     mockLoadAuth.mockResolvedValue(mockAuth);
-    mockGetNotificationsTimeline.mockRejectedValue(error);
+    mockGetNotificationTimeLine.mockRejectedValue(error);
 
     await runCli(["notify"]);
 
-    expect(mockGetNotificationsTimeline).toHaveBeenCalledWith(mockAuth);
+    expect(mockGetNotificationTimeLine).toHaveBeenCalledWith(mockAuth);
     expect(consoleErrorSpy).toHaveBeenCalledWith("Error:", "API request failed");
     expect(processExitSpy).toHaveBeenCalledWith(1);
   });
