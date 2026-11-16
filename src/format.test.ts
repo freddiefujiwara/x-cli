@@ -1,5 +1,5 @@
-import { formatTweet, formatThreadPretty, formatThreadJson } from "./format.js";
-import type { TweetThread, Tweet } from "./api.js";
+import { formatTweet, formatThreadPretty, formatThreadJson, formatNotificationsPretty, formatNotificationsJson, formatStatsPretty, formatStatsJson } from "./format.js";
+import type { TweetThread, Tweet, NotificationsPage, Notification, UserStats } from "./api.js";
 
 const createMockTweet = (overrides: Partial<Tweet> = {}): Tweet => ({
   id: "123456789",
@@ -248,6 +248,172 @@ describe("format", () => {
       expect(result).toContain("20 views");
       expect(result).not.toContain("retweets");
       expect(result).not.toContain("replies");
+    });
+  });
+});
+
+const createMockNotification = (overrides: Partial<Notification> = {}): Notification => ({
+  id: "notification1",
+  kind: "like",
+  actors: [{ id: "user1", name: "Actor 1", username: "actor1" }],
+  tweet: createMockTweet(),
+  raw: { some: "data" },
+  ...overrides,
+});
+
+const createMockNotificationsPage = (
+  overrides: Partial<NotificationsPage> = {}
+): NotificationsPage => ({
+  notifications: [createMockNotification()],
+  entries: [],
+  ...overrides,
+});
+
+describe("format notifications", () => {
+  describe("formatNotificationsPretty", () => {
+    it("should format a single notification", () => {
+      const page = createMockNotificationsPage({
+        notifications: [
+          createMockNotification({
+            kind: "like",
+            actors: [{ name: "Alice", username: "alice" }],
+          }),
+        ],
+      });
+      const result = formatNotificationsPretty(page);
+      expect(result).toContain("Alice");
+      expect(result).toContain("liked your tweet");
+    });
+
+    it("should format multiple notifications with a separator", () => {
+      const page = createMockNotificationsPage({
+        notifications: [createMockNotification(), createMockNotification()],
+      });
+      const result = formatNotificationsPretty(page);
+      // The separator contains ANSI color codes, so we just check for the core part.
+      expect(result).toContain("---");
+    });
+  });
+
+  describe("formatNotificationsJson", () => {
+    it("should return valid JSON", () => {
+      const page = createMockNotificationsPage();
+      const result = formatNotificationsJson(page, { color: false });
+      expect(() => JSON.parse(result)).not.toThrow();
+    });
+
+    it("should not include the 'raw' property", () => {
+      const page = createMockNotificationsPage();
+      const result = formatNotificationsJson(page, { color: false });
+      const data = JSON.parse(result);
+      expect(data[0].raw).toBeUndefined();
+    });
+
+    it("should include essential properties", () => {
+      const page = createMockNotificationsPage();
+      const result = formatNotificationsJson(page, { color: false });
+      const data = JSON.parse(result);
+      expect(data[0].id).toBe("notification1");
+      expect(data[0].kind).toBe("like");
+      expect(data[0].actors[0].name).toBe("Actor 1");
+      expect(data[0].tweet.id).toBe("123456789");
+    });
+  });
+
+  describe("formatNotificationsJson additions", () => {
+    it("should include tweetId and unread when present", () => {
+      const page = createMockNotificationsPage({
+        notifications: [createMockNotification({ tweet: undefined, tweetId: "999888777", unread: true })],
+      });
+      const data = JSON.parse(formatNotificationsJson(page, { color: false }));
+      expect(data[0].tweetId).toBe("999888777");
+      expect(data[0].unread).toBe(true);
+    });
+  });
+});
+
+describe("format stats", () => {
+  const createMockStats = (overrides: Partial<UserStats> = {}): UserStats => ({
+    collected_at: "2026-11-16T09:00:00.000Z",
+    username: "freddiefujiwara",
+    followers: 1841,
+    following: 120,
+    recent_posts: [
+      {
+        id: "1001",
+        posted_at: "2026-11-10T03:00:00.000Z",
+        text: "Hello stats",
+        views: 456,
+        likes: 7,
+        reposts: 3,
+        replies: 2,
+      },
+    ],
+    ...overrides,
+  });
+
+  describe("formatStatsJson", () => {
+    it("should emit the sns_snapshot-shaped document", () => {
+      const data = JSON.parse(formatStatsJson(createMockStats(), { color: false }));
+      expect(data.ok).toBe(true);
+      expect(data.collected_at).toBe("2026-11-16T09:00:00.000Z");
+      expect(data.x.username).toBe("freddiefujiwara");
+      expect(data.x.followers).toBe(1841);
+      expect(data.x.following).toBe(120);
+      expect(data.x.recent_posts).toHaveLength(1);
+      expect(data.x.recent_posts[0]).toEqual({
+        id: "1001",
+        posted_at: "2026-11-10T03:00:00.000Z",
+        text: "Hello stats",
+        views: 456,
+        likes: 7,
+        reposts: 3,
+        replies: 2,
+      });
+    });
+
+    it("should keep null metrics as null", () => {
+      const stats = createMockStats({ followers: null });
+      const data = JSON.parse(formatStatsJson(stats, { color: false }));
+      expect(data.x.followers).toBeNull();
+    });
+  });
+
+  describe("formatStatsPretty", () => {
+    it("should show the account summary and post metrics", () => {
+      const result = formatStatsPretty(createMockStats());
+      expect(result).toContain("@freddiefujiwara");
+      expect(result).toContain("followers");
+      expect(result).toContain("Hello stats");
+      expect(result).toContain("views");
+    });
+
+    it("should render placeholders for a missing username and counts", () => {
+      const result = formatStatsPretty(
+        createMockStats({ username: null, followers: null, following: null, recent_posts: [] })
+      );
+      expect(result).toContain("@?");
+      expect(result).toContain("unknown followers");
+    });
+
+    it("should omit the metrics line for a post with no metrics", () => {
+      const result = formatStatsPretty(
+        createMockStats({
+          recent_posts: [
+            {
+              id: "1009",
+              posted_at: null,
+              text: "No metrics yet",
+              views: null,
+              likes: null,
+              reposts: null,
+              replies: null,
+            },
+          ],
+        })
+      );
+      expect(result).toContain("No metrics yet");
+      expect(result).not.toContain("views");
     });
   });
 });
