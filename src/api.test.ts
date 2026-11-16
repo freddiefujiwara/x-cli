@@ -928,6 +928,16 @@ describe("user stats", () => {
   const makeTweetResult = (id: string, legacyOverrides: any = {}, overrides: any = {}) => ({
     __typename: "Tweet",
     rest_id: id,
+    core: {
+      user_results: {
+        result: {
+          __typename: "User",
+          rest_id: "386573",
+          core: { screen_name: "freddiefujiwara", name: "Fumikazu Fujiwara" },
+          legacy: { screen_name: "freddiefujiwara", name: "Fumikazu Fujiwara" },
+        },
+      },
+    },
     legacy: {
       full_text: `Post ${id}`,
       created_at: "Mon Nov 10 03:00:00 +0000 2026",
@@ -1091,9 +1101,10 @@ describe("user stats", () => {
         { entryId: "cursor-bottom-0", content: { value: "CURSOR123" } },
       ]);
 
-      const { posts, bottomCursor } = parseUserTweetsResponse(data);
+      const { posts, bottomCursor, authorUsername } = parseUserTweetsResponse(data);
       expect(posts.map((p) => p.id)).toEqual(["1001", "1003"]);
       expect(bottomCursor).toBe("CURSOR123");
+      expect(authorUsername).toBe("freddiefujiwara");
     });
 
     it("reads the legacy timeline path as a fallback", () => {
@@ -1142,7 +1153,7 @@ describe("user stats", () => {
     it("uses the stored userId when present", async () => {
       fetchSpy.mockImplementation(async (url: any) => {
         const u = String(url);
-        if (u.includes("UserByRestId")) return mockResponse(profileData);
+        if (u.includes("UserByScreenName")) return mockResponse(profileData);
         if (u.includes("UserTweets")) {
           return mockResponse(userTweetsData([tweetEntry(makeTweetResult("1001"))]));
         }
@@ -1171,22 +1182,58 @@ describe("user stats", () => {
         if (u.includes("UserTweets")) {
           return mockResponse(userTweetsData([tweetEntry(makeTweetResult("1001"))]));
         }
+        if (u.includes("UserByScreenName")) return mockResponse(profileData);
         throw new Error(`Unexpected URL: ${u}`);
       });
 
       const auth: AuthConfig = { authToken: "t", csrfToken: "c" };
       const stats = await getUserStats(auth);
 
-      expect(fetchSpy).toHaveBeenCalledTimes(2);
+      expect(fetchSpy).toHaveBeenCalledTimes(3);
       expect(stats.followers).toBe(1841);
       expect(stats.recent_posts).toHaveLength(1);
+    });
+
+    it("uses the stored username when present", async () => {
+      fetchSpy.mockImplementation(async (url: any) => {
+        const u = String(url);
+        if (u.includes("UserByScreenName")) return mockResponse(profileData);
+        if (u.includes("UserTweets")) {
+          return mockResponse(userTweetsData([tweetEntry(makeTweetResult("1001"))]));
+        }
+        throw new Error(`Unexpected URL: ${u}`);
+      });
+
+      const auth: AuthConfig = { authToken: "t", csrfToken: "c", username: "freddiefujiwara" };
+      const stats = await getUserStats(auth);
+
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+      expect(String(fetchSpy.mock.calls[0][0])).toContain("UserByScreenName");
+      expect(stats.followers).toBe(1841);
+      expect(stats.recent_posts).toHaveLength(1);
+    });
+
+    it("throws when no screen name can be learned from the posts timeline", async () => {
+      const anonymousTweet = { __typename: "Tweet", rest_id: "1001", legacy: { full_text: "x" } };
+      fetchSpy.mockImplementation(async (url: any) => {
+        const u = String(url);
+        if (u.includes("UserTweets")) {
+          return mockResponse(userTweetsData([tweetEntry(anonymousTweet)]));
+        }
+        throw new Error(`Unexpected URL: ${u}`);
+      });
+
+      const auth: AuthConfig = { authToken: "t", csrfToken: "c", userId: "386573" };
+      await expect(getUserStats(auth)).rejects.toThrow(
+        "Could not determine the logged-in user's screen name"
+      );
     });
 
     it("paginates until the requested count is collected and dedupes", async () => {
       let tweetsCalls = 0;
       fetchSpy.mockImplementation(async (url: any) => {
         const u = String(url);
-        if (u.includes("UserByRestId")) return mockResponse(profileData);
+        if (u.includes("UserByScreenName")) return mockResponse(profileData);
         if (u.includes("UserTweets")) {
           tweetsCalls++;
           if (tweetsCalls === 1) {
@@ -1219,10 +1266,10 @@ describe("user stats", () => {
       fetchSpy.mockResolvedValue(mockResponse("Internal Server Error", false, 500));
 
       const auth: AuthConfig = { authToken: "t", csrfToken: "c", userId: "386573" };
-      await expect(getUserStats(auth)).rejects.toThrow("UserByRestId failed (500)");
+      await expect(getUserStats(auth)).rejects.toThrow("UserTweets failed (500)");
     });
 
-    it("falls back to UserByRestId when the viewer has no follower count", async () => {
+    it("resolves counts via UserByScreenName when the viewer carries only an id", async () => {
       const viewerNoCounts = {
         data: {
           viewer_v2: {
@@ -1235,7 +1282,7 @@ describe("user stats", () => {
       fetchSpy.mockImplementation(async (url: any) => {
         const u = String(url);
         if (u.includes("NotificationsTimeline")) return mockResponse(viewerNoCounts);
-        if (u.includes("UserByRestId")) return mockResponse(profileData);
+        if (u.includes("UserByScreenName")) return mockResponse(profileData);
         if (u.includes("UserTweets")) {
           return mockResponse(userTweetsData([tweetEntry(makeTweetResult("1001"))]));
         }
@@ -1263,14 +1310,14 @@ describe("user stats", () => {
     it("throws when the profile result is missing", async () => {
       fetchSpy.mockResolvedValue(mockResponse({ data: { user: {} } }));
 
-      const auth: AuthConfig = { authToken: "t", csrfToken: "c", userId: "386573" };
+      const auth: AuthConfig = { authToken: "t", csrfToken: "c", username: "freddiefujiwara" };
       await expect(getUserStats(auth)).rejects.toThrow("Could not load the user profile");
     });
 
     it("throws when the API returns a GraphQL errors array", async () => {
       fetchSpy.mockImplementation(async (url: any) => {
         const u = String(url);
-        if (u.includes("UserByRestId")) return mockResponse(profileData);
+        if (u.includes("UserByScreenName")) return mockResponse(profileData);
         if (u.includes("UserTweets")) {
           return mockResponse({ errors: [{ message: "boom" }] });
         }
@@ -1285,7 +1332,7 @@ describe("user stats", () => {
       const seenVariables: any[] = [];
       fetchSpy.mockImplementation(async (url: any) => {
         const u = String(url);
-        if (u.includes("UserByRestId")) return mockResponse(profileData);
+        if (u.includes("UserByScreenName")) return mockResponse(profileData);
         if (u.includes("UserTweets")) {
           const variables = JSON.parse(new URL(u).searchParams.get("variables") || "{}");
           seenVariables.push(variables);
@@ -1316,7 +1363,7 @@ describe("user stats", () => {
       let tweetsCalls = 0;
       fetchSpy.mockImplementation(async (url: any) => {
         const u = String(url);
-        if (u.includes("UserByRestId")) return mockResponse(profileData);
+        if (u.includes("UserByScreenName")) return mockResponse(profileData);
         if (u.includes("UserTweets")) {
           tweetsCalls++;
           return mockResponse(

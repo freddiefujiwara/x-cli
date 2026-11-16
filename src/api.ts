@@ -979,7 +979,10 @@ export function parseNotificationsTimelineResponse(data: any): NotificationsPage
 
 // ===== User stats (own profile + recent posts) =====
 
-const USER_BY_REST_ID_QUERY_ID = "tD8zKvQzwY3kdx5yz6YmOw";
+// Note: UserByRestId is deliberately not used. Verified 2026-11-16 from
+// the production network: it was the only profile endpoint answered with
+// a Cloudflare 403 block page, while UserByScreenName worked.
+const USER_BY_SCREEN_NAME_QUERY_ID = "NimuplG1OB7Fd2btCLdBOw";
 const USER_TWEETS_QUERY_ID = "QWF3SzpHmykQHsQMixG0cg";
 
 export interface UserProfile {
@@ -1083,10 +1086,13 @@ async function graphqlGet(
   return data;
 }
 
-export async function getUserByRestId(auth: AuthConfig, userId: string): Promise<UserProfile> {
-  const data = await graphqlGet(auth, USER_BY_REST_ID_QUERY_ID, "UserByRestId", {
-    userId,
-    withSafetyModeUserFields: true,
+export async function getUserByScreenName(
+  auth: AuthConfig,
+  username: string
+): Promise<UserProfile> {
+  const data = await graphqlGet(auth, USER_BY_SCREEN_NAME_QUERY_ID, "UserByScreenName", {
+    screen_name: username,
+    withSafetyModeUserFields: false,
   });
   const profile = parseUserResult(data?.data?.user?.result);
   if (!profile) {
@@ -1101,25 +1107,6 @@ async function fetchViewerProfile(auth: AuthConfig): Promise<UserProfile | null>
     count: 1,
   });
   return extractViewerProfile(data);
-}
-
-export async function getOwnProfile(auth: AuthConfig): Promise<UserProfile> {
-  if (auth.userId) {
-    return getUserByRestId(auth, auth.userId);
-  }
-
-  // auth.json usually stores only the cookies, so resolve the account
-  // from the viewer object embedded in a notifications response.
-  const viewer = await fetchViewerProfile(auth);
-  if (viewer && viewer.followers !== null) {
-    return viewer;
-  }
-  if (viewer) {
-    return getUserByRestId(auth, viewer.id);
-  }
-  throw new Error(
-    "Could not determine the logged-in user. Try 'x logout' then 'x login' again."
-  );
 }
 
 /**
@@ -1161,7 +1148,11 @@ export function statsPostFromResult(result: any): StatsPost | null {
   };
 }
 
-export function parseUserTweetsResponse(data: any): { posts: StatsPost[]; bottomCursor?: string } {
+export function parseUserTweetsResponse(data: any): {
+  posts: StatsPost[];
+  bottomCursor?: string;
+  authorUsername?: string;
+} {
   const instructions =
     getByPath(data, "data.user.result.timeline_v2.timeline.instructions") ??
     getByPath(data, "data.user.result.timeline.timeline.instructions") ??
@@ -1169,6 +1160,15 @@ export function parseUserTweetsResponse(data: any): { posts: StatsPost[]; bottom
 
   const posts: StatsPost[] = [];
   let bottomCursor: string | undefined;
+  let authorUsername: string | undefined;
+
+  // Every entry on a user's own posts timeline is authored by that user,
+  // so the first resolvable author is the timeline owner's screen name.
+  const noteAuthor = (result: any) => {
+    if (authorUsername) return;
+    const tweet = result?.__typename === "TweetWithVisibilityResults" ? result.tweet : result;
+    authorUsername = extractActorFromUserResult(tweet?.core?.user_results?.result)?.username;
+  };
 
   for (const ins of instructions) {
     if (ins?.type !== "TimelineAddEntries" || !Array.isArray(ins.entries)) continue;
@@ -1177,13 +1177,17 @@ export function parseUserTweetsResponse(data: any): { posts: StatsPost[]; bottom
       const entryId = entry?.entryId ?? "";
 
       if (entryId.startsWith("tweet-")) {
-        const post = statsPostFromResult(entry?.content?.itemContent?.tweet_results?.result);
+        const result = entry?.content?.itemContent?.tweet_results?.result;
+        noteAuthor(result);
+        const post = statsPostFromResult(result);
         if (post) posts.push(post);
       } else if (entryId.startsWith("profile-conversation-")) {
         // A self-thread: only the head post counts (the rest are replies).
         const items = entry?.content?.items;
         const head = Array.isArray(items) ? items[0] : null;
-        const post = statsPostFromResult(head?.item?.itemContent?.tweet_results?.result);
+        const result = head?.item?.itemContent?.tweet_results?.result;
+        noteAuthor(result);
+        const post = statsPostFromResult(result);
         if (post) posts.push(post);
       } else if (entryId.startsWith("cursor-bottom-")) {
         const v = entry?.content?.value;
@@ -1192,14 +1196,14 @@ export function parseUserTweetsResponse(data: any): { posts: StatsPost[]; bottom
     }
   }
 
-  return { posts, bottomCursor };
+  return { posts, bottomCursor, authorUsername };
 }
 
 export async function getUserTweetsPage(
   auth: AuthConfig,
   userId: string,
   opts?: { count?: number; cursor?: string }
-): Promise<{ posts: StatsPost[]; bottomCursor?: string }> {
+): Promise<{ posts: StatsPost[]; bottomCursor?: string; authorUsername?: string }> {
   const variables: Record<string, any> = {
     userId,
     count: opts?.count ?? 50,
@@ -1224,19 +1228,56 @@ export async function getUserStats(
   opts?: { count?: number }
 ): Promise<UserStats> {
   const count = opts?.count ?? 50;
-  const profile = await getOwnProfile(auth);
+
+  let profile: UserProfile | null = null;
+  let userId: string | null = auth.userId ?? null;
+  let firstPage: { posts: StatsPost[]; bottomCursor?: string; authorUsername?: string } | null =
+    null;
+
+  if (auth.username) {
+    profile = await getUserByScreenName(auth, auth.username);
+    userId = profile.id;
+  }
+
+  if (!userId) {
+    // auth.json usually stores only the cookies. The viewer object in a
+    // notifications response carries the account's rest_id (verified
+    // 2026-11-16: nothing else, no counts), which is enough to fetch
+    // the account's own posts timeline.
+    const viewer = await fetchViewerProfile(auth);
+    userId = viewer?.id ?? null;
+  }
+
+  if (!userId) {
+    throw new Error(
+      "Could not determine the logged-in user. Try 'x logout' then 'x login' again."
+    );
+  }
+
+  if (!profile) {
+    // The posts timeline is needed anyway; its first page also reveals
+    // the screen name, which unlocks the profile counts.
+    firstPage = await getUserTweetsPage(auth, userId, { count });
+    if (!firstPage.authorUsername) {
+      throw new Error("Could not determine the logged-in user's screen name.");
+    }
+    profile = await getUserByScreenName(auth, firstPage.authorUsername);
+  }
 
   const byId = new Map<string, StatsPost>();
   let cursor: string | undefined;
   const MAX_PAGES = 6;
 
-  for (let page = 0; page < MAX_PAGES && byId.size < count; page++) {
-    const { posts, bottomCursor } = await getUserTweetsPage(auth, profile.id, { count, cursor });
-    for (const p of posts) {
+  for (let pageNo = 0; pageNo < MAX_PAGES && byId.size < count; pageNo++) {
+    const page =
+      pageNo === 0 && firstPage
+        ? firstPage
+        : await getUserTweetsPage(auth, userId, { count, cursor });
+    for (const p of page.posts) {
       if (!byId.has(p.id)) byId.set(p.id, p);
     }
-    if (!bottomCursor || bottomCursor === cursor) break;
-    cursor = bottomCursor;
+    if (!page.bottomCursor || page.bottomCursor === cursor) break;
+    cursor = page.bottomCursor;
   }
 
   return {
