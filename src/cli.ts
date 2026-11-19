@@ -10,12 +10,36 @@ import {
   getHomeLatestTimeline,
   getNotificationsTimeline,
   getUserStats,
+  type TweetThread,
 } from "./api.js";
 
 import { loadAuth, clearAuth } from "./storage.js";
 import { formatThreadPretty, formatThreadJson, formatTweet, formatNotificationsJson, formatNotificationsPretty, formatStatsJson, formatStatsPretty } from "./format.js";
 import { getCompletionScript } from "./completions.js";
 import { installCompletions } from "./setup.js";
+
+const PRETTY_OPTION = {
+  alias: "p",
+  describe: "Pretty print output with colors",
+  type: "boolean",
+  default: false,
+} as const;
+
+const CURSOR_OPTION = {
+  alias: "c",
+  describe: "Cursor for pagination (from previous response)",
+  type: "string",
+} as const;
+
+/** Prints an error and exits, as every command handler does on failure. */
+function fail(error: unknown): never {
+  console.error("Error:", error instanceof Error ? error.message : String(error));
+  process.exit(1);
+}
+
+function printThread(thread: TweetThread, pretty: boolean): void {
+  console.log(pretty ? formatThreadPretty(thread) : formatThreadJson(thread));
+}
 
 const cli = yargs(hideBin(process.argv))
   .scriptName("x")
@@ -30,60 +54,38 @@ const cli = yargs(hideBin(process.argv))
           type: "string",
           demandOption: true,
         })
-        .option("pretty", {
-          alias: "p",
-          describe: "Pretty print output with colors",
-          type: "boolean",
-          default: false,
-        });
+        .option("pretty", PRETTY_OPTION);
     },
     async (argv) => {
       try {
         const tweetId = extractTweetId(argv.url);
         const auth = await loadAuth();
 
+        let thread: TweetThread | null = null;
         if (auth) {
           // Authenticated mode: get full thread with replies
           try {
-            const thread = await getTweetDetail(tweetId, auth);
-            if (argv.pretty) {
-              console.log(formatThreadPretty(thread));
-            } else {
-              console.log(formatThreadJson(thread));
-            }
+            thread = await getTweetDetail(tweetId, auth);
           } catch (apiError: any) {
             // If auth failed (401/403), fall back to guest mode
-            if (apiError.status === 401 || apiError.status === 403) {
-              console.log("Auth expired, falling back to guest mode (no replies)...\n");
-              await clearAuth();
-              const tweet = await getTweetAsGuest(tweetId);
-              const thread = { mainTweet: tweet, parentTweets: [], replies: [] };
-              if (argv.pretty) {
-                console.log(formatThreadPretty(thread));
-              } else {
-                console.log(formatThreadJson(thread));
-              }
-            } else {
+            if (apiError.status !== 401 && apiError.status !== 403) {
               throw apiError;
             }
+            console.log("Auth expired, falling back to guest mode (no replies)...\n");
+            await clearAuth();
           }
         } else {
           // Guest mode: single tweet only (no replies)
           console.log("Not logged in, using guest mode (no replies). Run 'x login' to authenticate.\n");
-          const tweet = await getTweetAsGuest(tweetId);
-          const thread = { mainTweet: tweet, parentTweets: [], replies: [] };
-          if (argv.pretty) {
-            console.log(formatThreadPretty(thread));
-          } else {
-            console.log(formatThreadJson(thread));
-          }
         }
+
+        if (!thread) {
+          const tweet = await getTweetAsGuest(tweetId);
+          thread = { mainTweet: tweet, parentTweets: [], replies: [] };
+        }
+        printThread(thread, argv.pretty);
       } catch (error) {
-        console.error(
-          "Error:",
-          error instanceof Error ? error.message : String(error)
-        );
-        process.exit(1);
+        fail(error);
       }
     }
   )
@@ -98,23 +100,14 @@ const cli = yargs(hideBin(process.argv))
           type: "number",
           default: 40,
         })
-        .option("cursor", {
-          alias: "c",
-          describe: "Cursor for pagination (from previous response)",
-          type: "string",
-        })
+        .option("cursor", CURSOR_OPTION)
         .option("following", {
           alias: "f",
           describe: "Show following (latest) timeline",
           type: "boolean",
           default: false,
         })
-        .option("pretty", {
-          alias: "p",
-          describe: "Pretty print output with colors",
-          type: "boolean",
-          default: false,
-        });
+        .option("pretty", PRETTY_OPTION);
     },
     async (argv) => {
       try {
@@ -146,11 +139,7 @@ const cli = yargs(hideBin(process.argv))
           console.log(JSON.stringify(result, null, 2));
         }
       } catch (error) {
-        console.error(
-          "Error:",
-          error instanceof Error ? error.message : String(error)
-        );
-        process.exit(1);
+        fail(error);
       }
     }
   )
@@ -165,23 +154,14 @@ const cli = yargs(hideBin(process.argv))
           type: "number",
           default: 40,
         })
-        .option("cursor", {
-          alias: "c",
-          describe: "Cursor for pagination (from previous response)",
-          type: "string",
-        })
+        .option("cursor", CURSOR_OPTION)
         .option("type", {
           describe: "Timeline type to fetch",
           type: "string",
           choices: ["All", "Verified", "Mentions"],
           default: "All",
         })
-        .option("pretty", {
-          alias: "p",
-          describe: "Pretty print output with colors",
-          type: "boolean",
-          default: false,
-        });
+        .option("pretty", PRETTY_OPTION);
     },
     async (argv) => {
       try {
@@ -202,11 +182,7 @@ const cli = yargs(hideBin(process.argv))
           console.log(formatNotificationsJson(page));
         }
       } catch (error) {
-        console.error(
-          "Error:",
-          error instanceof Error ? error.message : String(error)
-        );
-        process.exit(1);
+        fail(error);
       }
     }
   )
@@ -221,12 +197,7 @@ const cli = yargs(hideBin(process.argv))
           type: "number",
           default: 50,
         })
-        .option("pretty", {
-          alias: "p",
-          describe: "Pretty print output with colors",
-          type: "boolean",
-          default: false,
-        });
+        .option("pretty", PRETTY_OPTION);
     },
     async (argv) => {
       try {
@@ -243,11 +214,7 @@ const cli = yargs(hideBin(process.argv))
           console.log(formatStatsJson(stats));
         }
       } catch (error) {
-        console.error(
-          "Error:",
-          error instanceof Error ? error.message : String(error)
-        );
-        process.exit(1);
+        fail(error);
       }
     }
   )
@@ -290,11 +257,7 @@ Without authentication, you can still view public tweets (but not replies).`);
         await clearAuth();
         console.log("Logged out successfully.");
       } catch (error) {
-        console.error(
-          "Error:",
-          error instanceof Error ? error.message : String(error)
-        );
-        process.exit(1);
+        fail(error);
       }
     }
   )
@@ -320,11 +283,7 @@ Without authentication, you can still view public tweets (but not replies).`);
           console.log(`User ID: ${auth.userId}`);
         }
       } catch (error) {
-        console.error(
-          "Error:",
-          error instanceof Error ? error.message : String(error)
-        );
-        process.exit(1);
+        fail(error);
       }
     }
   )
@@ -343,11 +302,7 @@ Without authentication, you can still view public tweets (but not replies).`);
       try {
         console.log(getCompletionScript(argv.shell));
       } catch (error) {
-        console.error(
-          "Error:",
-          error instanceof Error ? error.message : String(error)
-        );
-        process.exit(1);
+        fail(error);
       }
     }
   )
@@ -374,11 +329,7 @@ Without authentication, you can still view public tweets (but not replies).`);
           console.log(`\nTo activate, run:\n  ${result.reloadCommand}\n\nOr restart your terminal.`);
         }
       } catch (error) {
-        console.error(
-          "Error:",
-          error instanceof Error ? error.message : String(error)
-        );
-        process.exit(1);
+        fail(error);
       }
     }
   )

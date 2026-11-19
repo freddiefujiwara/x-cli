@@ -47,10 +47,10 @@ export function formatTweet(tweet: Tweet, indent: string = ""): string {
   const header = `${COLORS.bold}${author.name}${COLORS.reset} ${COLORS.gray}@${author.username}${COLORS.reset} ${COLORS.dim}${formatDate(createdAt)}${COLORS.reset}`;
 
   const stats = [
-    metrics.replies > 0 ? `${COLORS.cyan}${formatNumber(metrics.replies)} replies${COLORS.reset}` : null,
-    metrics.retweets > 0 ? `${COLORS.green}${formatNumber(metrics.retweets)} retweets${COLORS.reset}` : null,
-    metrics.likes > 0 ? `${COLORS.yellow}${formatNumber(metrics.likes)} likes${COLORS.reset}` : null,
-    metrics.views > 0 ? `${COLORS.gray}${formatNumber(metrics.views)} views${COLORS.reset}` : null,
+    metric(metrics.replies, COLORS.cyan, "replies"),
+    metric(metrics.retweets, COLORS.green, "retweets"),
+    metric(metrics.likes, COLORS.yellow, "likes"),
+    metric(metrics.views, COLORS.gray, "views"),
   ]
     .filter(Boolean)
     .join("  ");
@@ -105,25 +105,33 @@ function highlightJson(json: string): string {
     .replace(/: (true|false|null)/g, `: ${COLORS.blue}$1${COLORS.reset}`);
 }
 
-export function formatThreadJson(thread: TweetThread, options?: { color?: boolean }): string {
-  const json = JSON.stringify(thread, null, 2);
+function toJson(value: unknown, options?: { color?: boolean }): string {
+  const json = JSON.stringify(value, null, 2);
   const useColor = options?.color ?? process.stdout.isTTY;
   return useColor ? highlightJson(json) : json;
 }
 
+/** One colored metric (e.g. "12 likes"), or null when the count is absent or zero. */
+function metric(value: number | null | undefined, color: string, label: string): string | null {
+  return value ? `${color}${formatNumber(value)} ${label}${COLORS.reset}` : null;
+}
+
+export function formatThreadJson(thread: TweetThread, options?: { color?: boolean }): string {
+  return toJson(thread, options);
+}
+
 // ===== Notifications =====
+
+function actorLabel(actor: NotificationActor): string {
+  return `${COLORS.bold}${actor.name || actor.username}${COLORS.reset} ${COLORS.gray}@${actor.username}${COLORS.reset}`;
+}
 
 function formatActors(actors: NotificationActor[]): string {
   if (actors.length === 0) return "";
-  const firstActor = actors[0];
-  const first = `${COLORS.bold}${firstActor.name || firstActor.username}${COLORS.reset} ${COLORS.gray}@${firstActor.username}${COLORS.reset}`;
+  const first = actorLabel(actors[0]);
 
   if (actors.length === 1) return first;
-  if (actors.length === 2) {
-    const secondActor = actors[1];
-    const second = `${COLORS.bold}${secondActor.name || secondActor.username}${COLORS.reset} ${COLORS.gray}@${secondActor.username}${COLORS.reset}`;
-    return `${first} and ${second}`;
-  }
+  if (actors.length === 2) return `${first} and ${actorLabel(actors[1])}`;
   return `${first} and ${actors.length - 1} others`;
 }
 
@@ -189,9 +197,7 @@ export function formatNotificationsJson(page: NotificationsPage, options?: { col
     tweetId: n.tweetId,
     message: n.message,
   }));
-  const json = JSON.stringify(simplifiedNotifications, null, 2);
-  const useColor = options?.color ?? process.stdout.isTTY;
-  return useColor ? highlightJson(json) : json;
+  return toJson(simplifiedNotifications, options);
 }
 
 // ===== User stats =====
@@ -208,9 +214,7 @@ export function formatStatsJson(stats: UserStats, options?: { color?: boolean })
       recent_posts: stats.recent_posts,
     },
   };
-  const json = JSON.stringify(doc, null, 2);
-  const useColor = options?.color ?? process.stdout.isTTY;
-  return useColor ? highlightJson(json) : json;
+  return toJson(doc, options);
 }
 
 export function formatStatsPretty(stats: UserStats): string {
@@ -225,15 +229,9 @@ export function formatStatsPretty(stats: UserStats): string {
   for (const post of stats.recent_posts) {
     const when = post.posted_at ? formatDate(post.posted_at) : "";
     const metrics = [
-      post.replies != null && post.replies > 0
-        ? `${COLORS.cyan}${formatNumber(post.replies)} replies${COLORS.reset}`
-        : null,
-      post.reposts != null && post.reposts > 0
-        ? `${COLORS.green}${formatNumber(post.reposts)} reposts${COLORS.reset}`
-        : null,
-      post.likes != null && post.likes > 0
-        ? `${COLORS.yellow}${formatNumber(post.likes)} likes${COLORS.reset}`
-        : null,
+      metric(post.replies, COLORS.cyan, "replies"),
+      metric(post.reposts, COLORS.green, "reposts"),
+      metric(post.likes, COLORS.yellow, "likes"),
       post.views != null ? `${COLORS.gray}${formatNumber(post.views)} views${COLORS.reset}` : null,
     ]
       .filter(Boolean)
