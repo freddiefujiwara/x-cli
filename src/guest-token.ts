@@ -25,7 +25,7 @@ export async function getGuestToken(): Promise<string> {
 
   const data = await response.json();
 
-  if (!data.guest_token) {
+  if (!data?.guest_token) {
     throw new Error("No guest_token in response");
   }
 
