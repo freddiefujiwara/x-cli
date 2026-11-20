@@ -125,9 +125,22 @@ async function assertOk(response: Response, label: string): Promise<void> {
 }
 
 function assertNoErrors(data: any): void {
-  if (data.errors) {
+  if (data?.errors) {
     throw new Error(`API returned errors: ${JSON.stringify(data.errors)}`);
   }
+}
+
+/** First non-empty string among deformed-API candidates, else undefined. */
+function firstText(...values: any[]): string | undefined {
+  for (const v of values) {
+    if (typeof v === "string" && v) return v;
+  }
+  return undefined;
+}
+
+/** An id names an item only as a string or a number; anything else names nothing. */
+function idText(v: any): string {
+  return typeof v === "string" ? v : typeof v === "number" ? String(v) : "";
 }
 
 /** Unwraps a tweet result, returning null for tombstones. */
@@ -145,31 +158,49 @@ function extractTweetFromResult(result: any): Tweet | null {
     return null;
   }
 
+  // A tweet result without a usable rest_id has no identity to dedupe,
+  // link or reply to; statsPostFromResult and parseUserResult drop such
+  // results for the same reason. Without this guard, id-less tweets all
+  // shared one Map key in the home timeline dedupe and collapsed into a
+  // single phantom tweet.
+  if (typeof tweet.rest_id !== "string" || !tweet.rest_id) {
+    return null;
+  }
+
   const legacy = tweet.legacy;
   const user = tweet.core.user_results.result;
   const userLegacy = user.legacy || {};
   const userCore = user.core || {};
 
+  const viewsRaw = tweet.views?.count;
+  const viewsParsed =
+    typeof viewsRaw === "string" || typeof viewsRaw === "number"
+      ? parseInt(String(viewsRaw), 10)
+      : 0;
+
   return {
     id: tweet.rest_id,
-    text: legacy.full_text,
-    createdAt: legacy.created_at,
+    text: typeof legacy.full_text === "string" ? legacy.full_text : "",
+    createdAt: typeof legacy.created_at === "string" ? legacy.created_at : "",
     author: {
-      id: user.rest_id,
-      name: userCore.name || userLegacy.name || "",
-      username: userCore.screen_name || userLegacy.screen_name || "",
-      profileImageUrl: user.avatar?.image_url || userLegacy.profile_image_url_https || "",
+      id: firstText(user.rest_id) ?? "",
+      name: firstText(userCore.name, userLegacy.name) ?? "",
+      username: firstText(userCore.screen_name, userLegacy.screen_name) ?? "",
+      profileImageUrl: firstText(user.avatar?.image_url, userLegacy.profile_image_url_https) ?? "",
     },
     metrics: {
-      likes: legacy.favorite_count || 0,
-      retweets: legacy.retweet_count || 0,
-      replies: legacy.reply_count || 0,
-      quotes: legacy.quote_count || 0,
-      views: parseInt(tweet.views?.count || "0", 10),
-      bookmarks: legacy.bookmark_count || 0,
+      likes: metricOrZero(legacy.favorite_count),
+      retweets: metricOrZero(legacy.retweet_count),
+      replies: metricOrZero(legacy.reply_count),
+      quotes: metricOrZero(legacy.quote_count),
+      views: Number.isNaN(viewsParsed) ? 0 : viewsParsed,
+      bookmarks: metricOrZero(legacy.bookmark_count),
     },
     isReply: !!legacy.in_reply_to_status_id_str,
-    inReplyToTweetId: legacy.in_reply_to_status_id_str,
+    inReplyToTweetId:
+      typeof legacy.in_reply_to_status_id_str === "string"
+        ? legacy.in_reply_to_status_id_str
+        : undefined,
   };
 }
 
@@ -210,6 +241,7 @@ export async function getTweetDetail(
 /** Flattens the entries of all TimelineAddEntries instructions, in order. */
 function collectEntries(instructions: any[]): any[] {
   const entries: any[] = [];
+  if (!Array.isArray(instructions)) return entries;
   for (const ins of instructions) {
     if (ins?.type === "TimelineAddEntries" && Array.isArray(ins.entries)) {
       entries.push(...ins.entries);
@@ -228,8 +260,8 @@ function parseTweetDetailResponse(data: any, focalTweetId: string): TweetThread 
   let foundEmptyTweetResults = false;
 
   for (const entry of entries) {
-    const entryId = entry.entryId || "";
-    const content = entry.content;
+    const entryId = entry?.entryId || "";
+    const content = entry?.content;
 
     if (entryId.startsWith("tweet-")) {
       const tweetResult = content?.itemContent?.tweet_results?.result;
@@ -398,9 +430,12 @@ export function parseHomeTimelineResponse(
   // Pick up the next page cursor (best-effort as the location may change)
   const cursor = findCursor(entries);
 
-  // Deduplication (to prevent duplicates between promoted and regular tweets, and on re-fetch)
+  // Deduplication (to prevent duplicates between promoted and regular tweets, and on re-fetch).
+  // First occurrence wins, matching the byId dedupe in getUserStats.
   const uniq = new Map<string, Tweet>();
-  for (const t of tweets) uniq.set(t.id, t);
+  for (const t of tweets) {
+    if (!uniq.has(t.id)) uniq.set(t.id, t);
+  }
 
   return { tweets: [...uniq.values()], cursor };
 }
@@ -625,10 +660,10 @@ export function extractActorFromUserResult(userResult: any): NotificationActor |
   const legacy = userResult.legacy || {};
   const core = userResult.core || {};
   return {
-    id: userResult.rest_id,
-    name: core.name || legacy.name,
-    username: core.screen_name || legacy.screen_name,
-    profileImageUrl: userResult.avatar?.image_url || legacy.profile_image_url_https,
+    id: firstText(userResult.rest_id),
+    name: firstText(core.name, legacy.name),
+    username: firstText(core.screen_name, legacy.screen_name),
+    profileImageUrl: firstText(userResult.avatar?.image_url, legacy.profile_image_url_https),
   };
 }
 
@@ -747,8 +782,11 @@ const ELEMENT_TO_KIND: Record<string, NotificationKind> = {
  * @param element The value of `clientEventInfo.element` from the JSON response.
  */
 export function mapElementToNotificationKind(element?: string): NotificationKind {
-  if (!element) return "unknown";
-  return ELEMENT_TO_KIND[element] ?? "unknown";
+  if (typeof element !== "string" || !element) return "unknown";
+  // Own-property lookup only: a plain record access resolves names like
+  // "toString" or "__proto__" through the prototype chain and would hand
+  // back a function/object as the "kind".
+  return Object.hasOwn(ELEMENT_TO_KIND, element) ? ELEMENT_TO_KIND[element] : "unknown";
 }
 
 export function classifyNotificationKind(entry: any, tweet?: Tweet): NotificationKind {
@@ -768,7 +806,7 @@ export function classifyNotificationKind(entry: any, tweet?: Tweet): Notificatio
   const typenameNode = findFirstDeep(entry, (n) => isObject(n) && typeof n.__typename === "string", 6);
   const typename = (typenameNode?.__typename as string | undefined)?.toLowerCase() ?? "";
 
-  const entryId = String(entry?.entryId ?? "").toLowerCase();
+  const entryId = idText(entry?.entryId).toLowerCase();
   const msg = (extractNotificationMessage(entry) ?? "").toLowerCase();
   const richMessageIconId = getByPath(entry, "content.rich_message.icon.id") as string | undefined;
 
@@ -781,7 +819,7 @@ export function classifyNotificationKind(entry: any, tweet?: Tweet): Notificatio
     msg.includes("reposted") ||
     msg.includes("retweeted") ||
     entryId.includes("retweet") ||
-    richMessageIconId?.includes("retweet")
+    (typeof richMessageIconId === "string" && richMessageIconId.includes("retweet"))
   )
     return "retweet";
 
@@ -797,7 +835,7 @@ export function classifyNotificationKind(entry: any, tweet?: Tweet): Notificatio
 // ---- Entry -> Notification ----
 
 export function normalizeNotificationEntry(entry: any): Notification | null {
-  const entryId = String(entry?.entryId ?? "");
+  const entryId = idText(entry?.entryId);
   if (!entryId) return null;
   if (entryId.startsWith("cursor-")) return null;
 
@@ -862,22 +900,26 @@ export function compareSortIndex(a: string, b: string): number {
 }
 
 export function parseNotificationsTimelineResponse(data: any): NotificationsPage {
-  const instructions =
+  const rawInstructions =
     getByPath(data, "data.viewer_v2.user_results.result.notification_timeline.timeline.instructions") ?? [];
+  const instructions = Array.isArray(rawInstructions) ? rawInstructions : [];
 
   const entries = collectEntries(instructions);
 
   let topCursor: string | undefined;
   let bottomCursor: string | undefined;
   for (const e of entries) {
-    const entryId = e?.entryId ?? "";
+    const entryId = idText(e?.entryId);
     if (entryId.startsWith("cursor-top-") && e?.content?.value) topCursor = e.content.value;
     if (entryId.startsWith("cursor-bottom-") && e?.content?.value) bottomCursor = e.content.value;
   }
 
   let markUnreadGreaterThanSortIndex: string | undefined;
   for (const ins of instructions) {
-    if (ins?.type === "TimelineMarkEntriesUnreadGreaterThanSortIndex" && ins?.sort_index) {
+    if (
+      ins?.type === "TimelineMarkEntriesUnreadGreaterThanSortIndex" &&
+      typeof ins?.sort_index === "string"
+    ) {
       markUnreadGreaterThanSortIndex = ins.sort_index;
     }
   }
@@ -944,6 +986,11 @@ function metricOrNull(v: any): number | null {
   return typeof v === "number" && Number.isFinite(v) ? v : null;
 }
 
+/** Tweet metric counts default to 0 when absent or deformed (never a string, NaN or Infinity). */
+function metricOrZero(v: any): number {
+  return typeof v === "number" && Number.isFinite(v) ? v : 0;
+}
+
 export function parseUserResult(userResult: any): UserProfile | null {
   if (!userResult || userResult.__typename === "UserUnavailable") return null;
 
@@ -954,8 +1001,8 @@ export function parseUserResult(userResult: any): UserProfile | null {
   const core = userResult.core || {};
   return {
     id,
-    username: core.screen_name || legacy.screen_name || null,
-    name: core.name || legacy.name || null,
+    username: firstText(core.screen_name, legacy.screen_name) ?? null,
+    name: firstText(core.name, legacy.name) ?? null,
     followers: metricOrNull(legacy.followers_count),
     following: metricOrNull(legacy.friends_count),
   };
@@ -1011,6 +1058,53 @@ async function fetchViewerProfile(auth: AuthConfig): Promise<UserProfile | null>
   return extractViewerProfile(data);
 }
 
+const MONTH_INDEX: Record<string, number> = {
+  Jan: 0,
+  Feb: 1,
+  Mar: 2,
+  Apr: 3,
+  May: 4,
+  Jun: 5,
+  Jul: 6,
+  Aug: 7,
+  Sep: 8,
+  Oct: 9,
+  Nov: 10,
+  Dec: 11,
+};
+
+function isRealCalendarDate(year: number, month: number, day: number): boolean {
+  const d = new Date(Date.UTC(year, month, day));
+  return d.getUTCFullYear() === year && d.getUTCMonth() === month && d.getUTCDate() === day;
+}
+
+/**
+ * Parses a tweet created_at. Date parsing rolls non-existent dates over
+ * ("Feb 30" becomes Mar 2, in both the X string format and ISO), so when
+ * the string carries a recognizable calendar date, that date must exist.
+ */
+function parseCreatedAt(value: string): Date | null {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+
+  const iso = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  if (iso) {
+    return isRealCalendarDate(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3])) ? date : null;
+  }
+
+  const xFormat =
+    /\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) (\d{1,2}) \d{2}:\d{2}:\d{2} [+-]\d{4} (\d{4})\b/.exec(
+      value
+    );
+  if (xFormat) {
+    return isRealCalendarDate(Number(xFormat[3]), MONTH_INDEX[xFormat[1]], Number(xFormat[2]))
+      ? date
+      : null;
+  }
+
+  return date;
+}
+
 /**
  * Maps one tweet result to a stats post. Returns null for tombstones,
  * retweets and replies, mirroring the tweet-gas sns_snapshot query
@@ -1026,18 +1120,18 @@ export function statsPostFromResult(result: any): StatsPost | null {
   if (legacy.retweeted_status_result) return null;
   if (legacy.in_reply_to_status_id_str) return null;
 
-  const created = typeof legacy.created_at === "string" ? new Date(legacy.created_at) : null;
+  const created = typeof legacy.created_at === "string" ? parseCreatedAt(legacy.created_at) : null;
 
   const viewsRaw = tweet.views?.count;
   let views: number | null = null;
-  if (viewsRaw !== undefined && viewsRaw !== null && viewsRaw !== "") {
+  if ((typeof viewsRaw === "string" || typeof viewsRaw === "number") && viewsRaw !== "") {
     const parsed = Number.parseInt(String(viewsRaw), 10);
     views = Number.isNaN(parsed) ? null : parsed;
   }
 
   return {
     id: tweet.rest_id,
-    posted_at: created && !Number.isNaN(created.getTime()) ? created.toISOString() : null,
+    posted_at: created ? created.toISOString() : null,
     text: typeof legacy.full_text === "string" ? legacy.full_text : "",
     views,
     likes: metricOrNull(legacy.favorite_count),
