@@ -1107,6 +1107,58 @@ describe("user stats", () => {
       expect(authorUsername).toBe("freddiefujiwara");
     });
 
+    it("includes the pinned post from a TimelinePinEntry instruction, first", () => {
+      const data = {
+        data: {
+          user: {
+            result: {
+              timeline_v2: {
+                timeline: {
+                  instructions: [
+                    { type: "TimelinePinEntry", entry: tweetEntry(makeTweetResult("3001")) },
+                    {
+                      type: "TimelineAddEntries",
+                      entries: [tweetEntry(makeTweetResult("3002"))],
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        },
+      };
+      const { posts, authorUsername } = parseUserTweetsResponse(data);
+      expect(posts.map((p) => p.id)).toEqual(["3001", "3002"]);
+      expect(authorUsername).toBe("freddiefujiwara");
+    });
+
+    it("does not duplicate the pinned post when it also appears in the entries", () => {
+      const data = {
+        data: {
+          user: {
+            result: {
+              timeline_v2: {
+                timeline: {
+                  instructions: [
+                    { type: "TimelinePinEntry", entry: tweetEntry(makeTweetResult("3001")) },
+                    {
+                      type: "TimelineAddEntries",
+                      entries: [
+                        tweetEntry(makeTweetResult("3001")),
+                        tweetEntry(makeTweetResult("3002")),
+                      ],
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        },
+      };
+      const { posts } = parseUserTweetsResponse(data);
+      expect(posts.map((p) => p.id)).toEqual(["3001", "3002"]);
+    });
+
     it("reads the legacy timeline path as a fallback", () => {
       const data = {
         data: {
