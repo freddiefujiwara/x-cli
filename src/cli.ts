@@ -13,7 +13,7 @@ import {
   type TweetThread,
 } from "./api.js";
 
-import { loadAuth, clearAuth } from "./storage.js";
+import { loadAuth, clearAuth, type StoredAuth } from "./storage.js";
 import { formatThreadPretty, formatThreadJson, formatTweet, formatNotificationsJson, formatNotificationsPretty, formatStatsJson, formatStatsPretty } from "./format.js";
 import { getCompletionScript } from "./completions.js";
 import { installCompletions } from "./setup.js";
@@ -35,6 +35,21 @@ const CURSOR_OPTION = {
 function fail(error: unknown): never {
   console.error("Error:", error instanceof Error ? error.message : String(error));
   process.exit(1);
+}
+
+/**
+ * Loads the stored auth for commands that require login. When absent it
+ * prints the login hint and exits; it still returns null afterwards so
+ * callers stop even when process.exit is mocked (as in tests).
+ */
+async function requireAuth(): Promise<StoredAuth | null> {
+  const auth = await loadAuth();
+  if (!auth) {
+    console.log("Not logged in. Run 'x login' to authenticate.\n");
+    process.exit(1);
+    return null;
+  }
+  return auth;
 }
 
 function printThread(thread: TweetThread, pretty: boolean): void {
@@ -111,11 +126,8 @@ const cli = yargs(hideBin(process.argv))
     },
     async (argv) => {
       try {
-        const auth = await loadAuth();
-        if (!auth) {
-          console.log("Not logged in. Run 'x login' to authenticate.\n");
-          process.exit(1);
-        }
+        const auth = await requireAuth();
+        if (!auth) return;
         const result = argv.following
           ? await getHomeLatestTimeline(auth, {
             count: argv.count,
@@ -165,12 +177,8 @@ const cli = yargs(hideBin(process.argv))
     },
     async (argv) => {
       try {
-        const auth = await loadAuth();
-        if (!auth) {
-          console.log("Not logged in. Run 'x login' to authenticate.\n");
-          process.exit(1);
-          return;
-        }
+        const auth = await requireAuth();
+        if (!auth) return;
         const page = await getNotificationsTimeline(auth, {
           count: argv.count,
           cursor: argv.cursor,
@@ -201,12 +209,8 @@ const cli = yargs(hideBin(process.argv))
     },
     async (argv) => {
       try {
-        const auth = await loadAuth();
-        if (!auth) {
-          console.log("Not logged in. Run 'x login' to authenticate.\n");
-          process.exit(1);
-          return;
-        }
+        const auth = await requireAuth();
+        if (!auth) return;
         const stats = await getUserStats(auth, { count: argv.count });
         if (argv.pretty) {
           console.log(formatStatsPretty(stats));
