@@ -49,7 +49,7 @@ _x_completions() {
                     opts="--pretty -p --help -h"
                     ;;
                 login)
-                    opts="--force -f --help -h"
+                    opts="--help -h"
                     ;;
                 setup)
                     opts="--shell -s --help -h"
@@ -106,7 +106,6 @@ _x() {
                     ;;
                 login)
                     _arguments \\
-                        '(-f --force)'{-f,--force}'[Force re-login even if already logged in]' \\
                         '(-h --help)'{-h,--help}'[Show help]'
                     ;;
                 completion)
@@ -151,7 +150,6 @@ complete -c x -n "__fish_seen_subcommand_from tweet" -s p -l pretty -d "Pretty p
 complete -c x -n "__fish_seen_subcommand_from tweet" -s h -l help -d "Show help"
 
 # login command options
-complete -c x -n "__fish_seen_subcommand_from login" -s f -l force -d "Force re-login even if already logged in"
 complete -c x -n "__fish_seen_subcommand_from login" -s h -l help -d "Show help"
 
 # completion command arguments
